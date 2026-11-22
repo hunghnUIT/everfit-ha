@@ -42,7 +42,7 @@ export class UnitRegistry {
   }
 
   fromKg(kg: Decimal, code: UnitCode): Decimal {
-    return new D(kg).div(this.factor(code));
+    return kg.div(this.factor(code));
   }
 
   // "kg (kgs), lb (lbs)": for messages and the OpenAPI description.
