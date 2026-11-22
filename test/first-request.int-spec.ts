@@ -97,6 +97,42 @@ describe('the first request', () => {
     expect(await rowsFor(userId)).toEqual({ entries: 0, sets: 0 });
   });
 
+  it('a bare array on /bulk → 400 showing { "entries": [ … ] }', async () => {
+    const userId = uniqueUserId();
+    const res = withStatus(
+      await http()
+        .post(`${entriesPath(userId)}/bulk`)
+        .send([entryBody()]),
+      400,
+    );
+    expect(res.headers['content-type']).toMatch(PROBLEM_JSON);
+    expect(res.body.code).toBe('VALIDATION_ERROR');
+    expect(res.body.errors).toEqual([
+      { path: '', message: SHAPE_MESSAGES.bulkBody },
+    ]);
+    expect(res.body.errors[0].message).toContain('{ "entries": [{');
+    expect(await rowsFor(userId)).toEqual({ entries: 0, sets: 0 });
+  });
+
+  it('{ "entries": [null] } → 400 at entries[0] showing the entry shape', async () => {
+    const userId = uniqueUserId();
+    const res = withStatus(
+      await http()
+        .post(`${entriesPath(userId)}/bulk`)
+        .send({ entries: [null] }),
+      400,
+    );
+    expect(res.headers['content-type']).toMatch(PROBLEM_JSON);
+    expect(res.body.code).toBe('VALIDATION_ERROR');
+    expect(res.body.errors).toEqual([
+      { path: 'entries[0]', message: SHAPE_MESSAGES.entry },
+    ]);
+    expect(res.body.errors[0].message).toContain(
+      '"exerciseName": "Bench Press"',
+    );
+    expect(await rowsFor(userId)).toEqual({ entries: 0, sets: 0 });
+  });
+
   it('a POST with the JSON header and no body → 400 showing the expected object; a bare null → 400 MALFORMED_JSON', async () => {
     const userId = uniqueUserId();
     const empty = await http()
