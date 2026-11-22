@@ -1,7 +1,17 @@
 import get from 'lodash/get';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { v7 } from 'uuid';
 import { runMigrateStep } from '../src/database/migrator';
 import { createEmptyDatabase, query } from './support/database';
+
+// The project keeps real dates out of files; Drizzle reads `when` only for order.
+const JOURNAL_WHEN_BELOW = 1767225600000; // 2026-01-01T00:00:00Z
+
+const JOURNAL = join(
+  __dirname,
+  '../src/database/migrations/meta/_journal.json',
+);
 
 const INSERT_ENTRY = `
   INSERT INTO workout_entries
@@ -113,4 +123,13 @@ describe('migrate', () => {
     expect(query('SHOW timezone')).resolves.toEqual([
       { TimeZone: 'America/Los_Angeles' },
     ]));
+
+  it("every journal entry's when is a fixed 2025 value, increasing in idx order", () => {
+    const { entries } = JSON.parse(readFileSync(JOURNAL, 'utf8')) as {
+      entries: { idx: number; when: number }[];
+    };
+    const whens = [...entries].sort((a, b) => a.idx - b.idx).map((e) => e.when);
+    for (const when of whens) expect(when).toBeLessThan(JOURNAL_WHEN_BELOW);
+    whens.slice(1).forEach((when, i) => expect(when).toBeGreaterThan(whens[i]));
+  });
 });
