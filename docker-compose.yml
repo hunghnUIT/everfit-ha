@@ -64,5 +64,20 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # Benchmark data: `docker compose --profile bench up bench` (design §11).
+  # BENCH_SCALE=1 is the full size; the script prints row counts and time.
+  bench:
+    profiles: [bench]
+    build:
+      context: .
+      target: build
+    command: ["npm", "run", "bench:data"]
+    environment:
+      <<: *db-env
+      BENCH_SCALE: ${BENCH_SCALE:-1}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
 volumes:
   pgdata:
