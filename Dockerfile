@@ -11,6 +11,8 @@ COPY tsconfig.json tsconfig.build.json nest-cli.json ./
 COPY src ./src
 # nest-cli.json's assets copy the hand-written SQL into dist/database/migrations.
 RUN npm run build
+# The benchmark service runs tsx on these files in this stage.
+COPY scripts ./scripts
 
 FROM node:26-alpine AS deps
 WORKDIR /app
