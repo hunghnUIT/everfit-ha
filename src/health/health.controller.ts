@@ -5,13 +5,14 @@ import {
   HealthIndicatorService,
 } from '@nestjs/terminus';
 import { Pool } from 'pg';
+import { PG_POOL } from '../database/tokens';
 
 @Controller('health')
 export class HealthController {
   constructor(
     private readonly health: HealthCheckService,
     private readonly indicators: HealthIndicatorService,
-    @Inject(Pool) private readonly pool: Pool,
+    @Inject(PG_POOL) private readonly pool: Pool,
   ) {}
 
   // The process is up; the database is not consulted.

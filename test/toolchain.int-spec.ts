@@ -1,6 +1,6 @@
-import { Pool } from 'pg';
 import request from 'supertest';
 import { v7 } from 'uuid';
+import { PG_POOL } from '../src/database/tokens';
 import { createTestApp } from './support/app';
 
 // Stands in for the pool when the database is unreachable.
@@ -23,7 +23,7 @@ describe('toolchain', () => {
       (
         await createTestApp({
           // A pool whose every query fails: live must not touch the database.
-          providers: [{ provide: Pool, useValue: failingPool() }],
+          providers: [{ provide: PG_POOL, useValue: failingPool() }],
         })
       ).getHttpServer(),
     )
