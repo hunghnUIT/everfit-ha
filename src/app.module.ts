@@ -7,6 +7,7 @@ import { ApiEnv, validateApiEnv } from './config/env';
 import { DatabaseModule } from './database/database.module';
 import { ExercisesModule } from './exercises/exercises.module';
 import { HealthModule } from './health/health.module';
+import { PersonalRecordsModule } from './personal-records/personal-records.module';
 import { UnitsModule } from './units/units.module';
 import { WorkoutsModule } from './workouts/workouts.module';
 
@@ -22,6 +23,7 @@ import { WorkoutsModule } from './workouts/workouts.module';
     DatabaseModule,
     ExercisesModule,
     HealthModule,
+    PersonalRecordsModule,
     UnitsModule,
     WorkoutsModule,
   ],

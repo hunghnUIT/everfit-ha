@@ -1,6 +1,8 @@
 import { INestApplication } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
+import { D } from '../../src/common/decimal';
+import type { CandidateSet } from '../../src/workouts/domain/metrics';
 import { query } from './database';
 
 export const PROBLEM_JSON = /^application\/problem\+json/;
@@ -31,6 +33,35 @@ export async function rowsFor(
     [userId],
   );
   return counts;
+}
+
+// Every stored set of one user's exercise, as pickRecord takes them: read
+// straight from the tables, so the PR tests compare the API's SQL with the
+// domain function over what was really stored (design §7, §12).
+export async function storedCandidates(
+  userId: string,
+  key: string,
+): Promise<CandidateSet[]> {
+  const rows = await query<{
+    entry_id: string;
+    performed_at: Date;
+    set_number: number;
+    reps: number;
+    weight_kg: string;
+  }>(
+    `SELECT e.id AS entry_id, e.performed_at, s.set_number, s.reps,
+            s.weight_kg::text AS weight_kg
+       FROM workout_entries e JOIN workout_sets s ON s.entry_id = e.id
+      WHERE e.user_id = $1 AND e.exercise_key = $2`,
+    [userId, key],
+  );
+  return rows.map((row) => ({
+    entryId: row.entry_id,
+    performedAt: row.performed_at,
+    setNumber: row.set_number,
+    reps: row.reps,
+    weightKg: new D(row.weight_kg),
+  }));
 }
 
 // A userId no other test uses, so the tests of one file never see each
