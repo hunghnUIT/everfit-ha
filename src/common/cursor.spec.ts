@@ -48,6 +48,23 @@ describe('cursor codec (design §9.2)', () => {
     ).toBeNull();
   });
 
+  it('returns null for an `at` outside 1900 to year 9999, which no stored row has', () => {
+    const at = (value: string) =>
+      decodeCursor(b64(`{"v":1,"at":"${value}","id":"${ID}"}`));
+    expect(at('+010000-01-01T00:00:00Z')).toBeNull();
+    expect(at('9999-12-31T23:59:59.9991Z')).toBeNull();
+    expect(at('-000001-01-01T00:00:00Z')).toBeNull();
+    expect(at('1899-12-31T23:59:59.999Z')).toBeNull();
+    expect(at('9999-12-31T23:59:59.999Z')).toEqual({
+      at: new Date('9999-12-31T23:59:59.999Z'),
+      id: ID,
+    });
+    expect(at('1900-01-01T00:00:00Z')).toEqual({
+      at: new Date('1900-01-01T00:00:00Z'),
+      id: ID,
+    });
+  });
+
   it('returns null, without throwing, for a value that is not a string', () =>
     expect(decodeCursor(['a', 'b'] as unknown as string)).toBeNull());
 });

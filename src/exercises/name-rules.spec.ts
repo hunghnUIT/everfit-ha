@@ -1,4 +1,8 @@
-import { checkExerciseName, checkMuscleGroupName } from './name-rules';
+import {
+  checkExerciseName,
+  checkMuscleGroupName,
+  readExerciseTerm,
+} from './name-rules';
 
 // U+FDFA (ARABIC LIGATURE SALLALLAHOU ALAYHE WASALLAM), one code point
 // that NFKC turns into 18 (V-21).
@@ -74,6 +78,39 @@ describe('checkExerciseName (design §10.1)', () => {
         },
       ],
     }));
+});
+
+describe('NUL and blank terms (final review B1, B2)', () => {
+  it('checkExerciseName refuses a name holding NUL, which PostgreSQL cannot store', () =>
+    expect(checkExerciseName('Bench\u0000Press', 'exerciseName')).toEqual({
+      ok: false,
+      errors: [
+        {
+          path: 'exerciseName',
+          message: 'The name must not contain the NUL character.',
+        },
+      ],
+    }));
+
+  it('readExerciseTerm normalises a term, and refuses NUL and a blank key', () => {
+    expect(readExerciseTerm('  Bench   PRESS ', 'exercise')).toEqual({
+      ok: true,
+      value: 'bench press',
+    });
+    expect(readExerciseTerm('bench\u0000', 'exercise')).toEqual({
+      ok: false,
+      errors: [
+        {
+          path: 'exercise',
+          message: 'exercise must not contain the NUL character.',
+        },
+      ],
+    });
+    expect(readExerciseTerm(' \u00a0 ', 'exercise')).toEqual({
+      ok: false,
+      errors: [{ path: 'exercise', message: 'exercise must not be blank.' }],
+    });
+  });
 });
 
 describe('checkMuscleGroupName (design §10.1)', () => {

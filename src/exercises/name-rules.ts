@@ -16,6 +16,10 @@ function refuse<T>(path: string, message: string): Check<T> {
   return { ok: false, errors: [{ path, message }] };
 }
 
+// PostgreSQL's text type cannot hold U+0000: a statement that binds it fails
+// with 22021, a 500. So no stored name or key contains it.
+export const hasNul = (s: string) => s.includes('\u0000');
+
 // One rule for the entry write, the catalog write and the seed. `name` is the
 // trimmed input as the client wrote it; `key` is what is stored and matched.
 export function checkExerciseName(
@@ -24,6 +28,9 @@ export function checkExerciseName(
 ): Check<{ name: string; key: string }> {
   if (typeof raw !== 'string')
     return refuse(path, 'The name must be a string.');
+  if (hasNul(raw)) {
+    return refuse(path, 'The name must not contain the NUL character.');
+  }
   const name = raw.trim();
   const key = exerciseKey(name);
   if (name === '' || key === '') {
@@ -44,6 +51,19 @@ export function checkExerciseName(
     );
   }
   return { ok: true, value: { name, key } };
+}
+
+// The `exercise` term of a read (history, PRs, compare), normalised as keys
+// are. Blank once normalised is refused rather than read as no filter or as
+// the key '' (design §9: an unfiltered list reads as an answer), and NUL
+// before it reaches a statement. Length is the DTO's check.
+export function readExerciseTerm(raw: string, path: string): Check<string> {
+  if (hasNul(raw)) {
+    return refuse(path, `${path} must not contain the NUL character.`);
+  }
+  const key = exerciseKey(raw);
+  if (key === '') return refuse(path, `${path} must not be blank.`);
+  return { ok: true, value: key };
 }
 
 // Returns the normalised group name, the form that is stored and matched.

@@ -13,8 +13,9 @@ import { SHARED_UNIT_REGISTRY } from '../../units/unit-registry';
 
 const BOUND_DESCRIPTION =
   'Required. An RFC 3339 date-time with Z or a UTC offset (some ISO 8601 ' +
-  'variants are tolerated), not before 1900-01-01T00:00:00Z. Each period is ' +
-  'half-open: its start is included, its end is not. The periods may overlap.';
+  'variants are tolerated), from 1900-01-01T00:00:00Z to ' +
+  '9999-12-31T23:59:59.999Z. Each period is half-open: its start is ' +
+  'included, its end is not. The periods may overlap.';
 
 // The query of GET …/personal-records/compare (design §9.4). class-validator
 // checks presence and types; readCompareQuery reads the dates and the unit.

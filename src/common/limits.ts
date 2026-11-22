@@ -24,6 +24,11 @@ export const BODY_LIMIT = '1mb';
 // Time
 export const FUTURE_TOLERANCE_MS = 15 * 60_000;
 export const EARLIEST_INSTANT = '1900-01-01T00:00:00Z';
+// The last instant toISOString prints with a four-digit year; a later one is
+// printed as +010000-…, which PostgreSQL refuses. This departs from design
+// §8's "no upper limit" on read bounds (controller ruling, final review B1):
+// nothing is stored after now + 15 minutes, so no answer changes.
+export const LATEST_INSTANT = '9999-12-31T23:59:59.999Z';
 export const MIN_UTC_OFFSET_MINUTES = -12 * 60;
 export const MAX_UTC_OFFSET_MINUTES = 14 * 60;
 

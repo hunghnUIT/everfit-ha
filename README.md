@@ -287,7 +287,8 @@ user has no entries and gets a 200 with an empty result.
 On the four routes that read query parameters (history, one entry, PRs and
 compare), a parameter the route does not accept is a 400 that names it and
 lists the accepted ones, and a parameter sent twice, or with an empty value, is
-a 400 too. Otherwise `?exerciseName=bench` (the body's field name) would return
+a 400 too; so is an `exercise` of spaces only, or one holding the NUL
+character. Otherwise `?exerciseName=bench` (the body's field name) would return
 the unfiltered list, which reads as an answer. Every response is documented in
 `/docs`, including each route's problem responses; every example there, and in
 this README and `requests.http`, is a full date-time with an offset.
@@ -611,7 +612,11 @@ an offset. The response carries `"date"` (the stored instant) and `"utcOffset"`.
   leave a gap. A date alone is a 400 that shows what to send (on `to`, "to include all
   of 2025-02-28, send the start of the next day"; on `from`, "to start at 2025-02-01,
   send the start of that day"). Bounds with finer digits are rounded up to the next
-  millisecond.
+  millisecond. A bound is accepted from `1900-01-01T00:00:00Z` to
+  `9999-12-31T23:59:59.999Z` after rounding; outside them it is a 400 on the bound.
+  The upper limit is not in the design, which says reads have none: a later instant
+  reached PostgreSQL as a six-digit year and answered 500, and nothing is stored that
+  late, so no answer changes (a ruling of the final review).
 - **A `+` in a query string arrives as a space.** `from=…T00:00:00+07:00` reaches the
   server as `…T00:00:00 07:00` **[V]**, the likely failure of a first ranged curl. After
   a time, a space followed by an offset has no other meaning, so the server reads it as
