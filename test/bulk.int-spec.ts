@@ -19,6 +19,28 @@ import {
 // The number of different writes the concurrency test sends at once.
 const BURST = 8;
 
+// A set with this reps value is the one the test trigger acts on.
+const MARKER_REPS = 777;
+
+// Runs `run` while a BEFORE INSERT trigger on workout_sets executes `body`
+// (PL/pgSQL) for each row; the trigger is dropped afterwards in any case.
+// The same helper as in entries.int-spec.ts.
+async function withSetTrigger(
+  body: string,
+  run: () => Promise<void>,
+): Promise<void> {
+  await query(`CREATE FUNCTION test_set_trigger() RETURNS trigger
+                 LANGUAGE plpgsql AS $$ BEGIN ${body} RETURN NEW; END $$`);
+  await query(`CREATE TRIGGER test_set_trigger BEFORE INSERT ON workout_sets
+                 FOR EACH ROW EXECUTE FUNCTION test_set_trigger()`);
+  try {
+    await run();
+  } finally {
+    await query('DROP TRIGGER IF EXISTS test_set_trigger ON workout_sets');
+    await query('DROP FUNCTION IF EXISTS test_set_trigger()');
+  }
+}
+
 // Bulk logging and concurrency (design §9.1, §9.5; §12, the bulk and
 // concurrency row).
 describe('log entries in bulk (design §9.1, §9.5)', () => {
@@ -38,6 +60,55 @@ describe('log entries in bulk (design §9.1, §9.5)', () => {
     app = await createTestApp({
       providers: [{ provide: CLOCK, useValue: fixedClock(NOW) }],
     });
+  });
+
+  // Design §9.5, "no partial batches": a phone syncing a session whose write
+  // fails in the database must find nothing stored, so a retry duplicates
+  // nothing.
+  it('a sets INSERT that fails on the third of three entries → 500 and 0 rows', async () => {
+    const userId = uniqueUserId();
+    await withSetTrigger(
+      `IF NEW.reps = ${MARKER_REPS} THEN RAISE EXCEPTION 'test failure'; END IF;`,
+      async () => {
+        const res = withStatus(
+          await postBulk(userId, {
+            entries: [entryBody(), entryBody(), oneSet(MARKER_REPS, 100)],
+          }),
+          500,
+        );
+        expect(res.headers['content-type']).toMatch(PROBLEM_JSON);
+        expect(res.body).toMatchObject({
+          code: 'INTERNAL_ERROR',
+          requestId: expect.any(String),
+        });
+      },
+    );
+    expect(await rowsFor(userId)).toEqual({ entries: 0, sets: 0 });
+  });
+
+  // Ruling 1: the read-back runs inside the write's transaction, so a failed
+  // read-back is a 500 with nothing stored, never stored rows the client was
+  // told failed.
+  it('a read-back that fails → 500 and 0 rows (it runs inside the transaction)', async () => {
+    const userId = uniqueUserId();
+    const spy = jest
+      .spyOn(app.get(WorkoutsRepository), 'findEntriesByIds')
+      .mockRejectedValueOnce(new Error('test failure'));
+    try {
+      const res = withStatus(
+        await postBulk(userId, { entries: [entryBody(), entryBody()] }),
+        500,
+      );
+      expect(res.headers['content-type']).toMatch(PROBLEM_JSON);
+      expect(res.body).toMatchObject({
+        code: 'INTERNAL_ERROR',
+        requestId: expect.any(String),
+      });
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await rowsFor(userId)).toEqual({ entries: 0, sets: 0 });
   });
 
   it('one bad entry → 400 and 0 rows', async () => {
