@@ -1,7 +1,7 @@
 {
-  "name": "evefit",
+  "name": "workout-logging-api",
   "version": "0.0.1",
-  "description": "",
+  "description": "A REST API that logs strength workouts and computes personal records, with NestJS and PostgreSQL",
   "author": "",
   "private": true,
   "license": "UNLICENSED",

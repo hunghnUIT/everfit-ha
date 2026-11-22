@@ -65,6 +65,62 @@ describe('errors', () => {
     });
   });
 
+  // Outside /v1 too: a browser opening the root, a typed "/health", the
+  // browser's own favicon request (§9.6: every non-2xx is problem details).
+  it.each([
+    ['get', '/'],
+    ['get', '/health'],
+    ['get', '/favicon.ico'],
+  ] as const)(
+    'unknown route outside /v1: %s %s → 404 problem+json with requestId',
+    async (method, path) => {
+      const res = await http()[method](path).expect(404);
+      expect(res.headers['content-type']).toMatch(PROBLEM_JSON);
+      expect(res.headers['x-request-id']).toEqual(expect.any(String));
+      expect(res.body).toMatchObject({
+        status: 404,
+        code: 'NOT_FOUND',
+        instance: path,
+        requestId: res.headers['x-request-id'],
+      });
+    },
+  );
+
+  it('unknown route outside /v1: POST /nope with a JSON body → 404 problem+json with requestId', async () => {
+    const res = await http().post('/nope').send({ n: 1 }).expect(404);
+    expect(res.headers['content-type']).toMatch(PROBLEM_JSON);
+    expect(res.body).toMatchObject({
+      code: 'NOT_FOUND',
+      instance: '/nope',
+      requestId: res.headers['x-request-id'],
+    });
+  });
+
+  it('the routes outside /v1 and a /v1 route are still served where they were', async () => {
+    await http().get('/health/live').expect(200);
+    await http().get('/health/ready').expect(200);
+    const html = await http().get('/docs').expect(200);
+    expect(html.headers['content-type']).toMatch(/^text\/html/);
+    const units = await http().get('/v1/units').expect(200);
+    expect(units.body.data).toEqual(expect.any(Array));
+    // The app as main.ts builds it, without the probe routes.
+    const plain = await createTestApp();
+    const doc = (
+      await request(plain.getHttpServer()).get('/docs-json').expect(200)
+    ).body;
+    const operations = Object.entries<Record<string, unknown>>(
+      doc.paths,
+    ).flatMap(([path, ops]) =>
+      Object.keys(ops).map((method) => `${method} ${path}`),
+    );
+    // The routes of design §9 with the two health routes; docs.int-spec pins
+    // each one.
+    expect(operations).toHaveLength(17);
+    expect(operations).toContain('get /v1/exercises');
+    expect(operations).toContain('post /v1/admin/exercises');
+    expect(operations).toContain('get /health/live');
+  });
+
   it('malformed JSON → 400 MALFORMED_JSON', async () => {
     const res = await http()
       .post('/v1/probe')

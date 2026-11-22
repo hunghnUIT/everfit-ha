@@ -1,5 +1,5 @@
 import { Check, FieldError } from '../common/problem';
-import { exerciseKey } from '../exercises/exercise-key';
+import { readExerciseTerm } from '../exercises/name-rules';
 import { UnitRegistry } from '../units/unit-registry';
 import { UnitCode } from '../units/weight-units';
 import {
@@ -43,6 +43,8 @@ export function readCompareQuery(
   units: UnitRegistry,
 ): Check<CompareQuery> {
   const errors: FieldError[] = [];
+  const term = readExerciseTerm(q.exercise, 'exercise');
+  if (!term.ok) errors.push(...term.errors);
   const read: Partial<Record<BoundPath, Date>> = {};
   for (const [path, bound] of BOUNDS) {
     const parsed = parseReadBound(repairOffsetPlus(q[path]), path, bound);
@@ -59,6 +61,7 @@ export function readCompareQuery(
   const { from, to, compareFrom, compareTo } = read;
   if (
     errors.length > 0 ||
+    !term.ok ||
     !unit.ok ||
     from === undefined ||
     to === undefined ||
@@ -70,7 +73,7 @@ export function readCompareQuery(
   return {
     ok: true,
     value: {
-      key: exerciseKey(q.exercise),
+      key: term.value,
       current: { from, to },
       previous: { from: compareFrom, to: compareTo },
       unit: unit.value,

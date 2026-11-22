@@ -24,7 +24,7 @@ import {
   exerciseKey,
   muscleGroupName,
 } from './exercise-key';
-import { checkExerciseName, checkMuscleGroupName } from './name-rules';
+import { checkExerciseName, checkMuscleGroupName, hasNul } from './name-rules';
 
 // The catalog's writes (design §10.5, §10.6). Every write goes through
 // withCatalogWrite: one transaction under the catalog write lock, then this
@@ -105,6 +105,14 @@ function exerciseNotFound(key: string): ApiProblem {
     404,
     'NOT_FOUND',
     `No catalog exercise has the key "${key}".`,
+  );
+}
+
+function muscleGroupNotFound(name: string): ApiProblem {
+  return new ApiProblem(
+    404,
+    'NOT_FOUND',
+    `No muscle group is named "${name}".`,
   );
 }
 
@@ -206,6 +214,8 @@ export class CatalogService {
     body: ExerciseWriteDto,
   ): Promise<ExerciseJson> {
     const key = exerciseKey(pathValue);
+    // No stored key holds NUL, and PostgreSQL would refuse to bind it.
+    if (hasNul(key)) throw exerciseNotFound(key);
     const write = this.read(body);
     if (write.key !== key) {
       throw validationProblem([
@@ -245,6 +255,7 @@ export class CatalogService {
   // again (§10.6).
   async deleteExercise(pathValue: string): Promise<void> {
     const key = exerciseKey(pathValue);
+    if (hasNul(key)) throw exerciseNotFound(key);
     await this.withCatalogWrite(
       { route: EXERCISE_ROUTES.delete, key },
       async (tx) => {
@@ -290,6 +301,7 @@ export class CatalogService {
   // typed by hand) is the same 409, from the foreign key (NO ACTION).
   async deleteMuscleGroup(pathValue: string): Promise<void> {
     const name = muscleGroupName(pathValue);
+    if (hasNul(name)) throw muscleGroupNotFound(name);
     await this.withCatalogWrite(
       { route: MUSCLE_GROUP_ROUTES.delete, key: name },
       async (tx) => {
@@ -297,13 +309,7 @@ export class CatalogService {
           .select({ name: muscleGroups.name })
           .from(muscleGroups)
           .where(eq(muscleGroups.name, name));
-        if (group === undefined) {
-          throw new ApiProblem(
-            404,
-            'NOT_FOUND',
-            `No muscle group is named "${name}".`,
-          );
-        }
+        if (group === undefined) throw muscleGroupNotFound(name);
         await this.refuseIfInUse(tx, name);
         try {
           await tx.transaction(async (savepoint) => {

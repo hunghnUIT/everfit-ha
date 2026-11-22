@@ -51,6 +51,10 @@ const earliestMessage = (raw: string) =>
   `'${raw}' is before 1900-01-01T00:00:00Z, the earliest moment accepted. ` +
   'Check the year.';
 
+const latestMessage = (raw: string) =>
+  `'${raw}' is after 9999-12-31T23:59:59.999Z, the latest moment accepted. ` +
+  'Check the year.';
+
 describe('parseWriteDate', () => {
   it.each([
     // every row of the §8 table
@@ -187,6 +191,8 @@ describe('parseReadBound', () => {
     ['2025-02-01T00:00:00.1231Z', 'from', '2025-02-01T00:00:00.124Z'],
     ['1950-06-01T10:00:00.1231Z', 'to', '1950-06-01T10:00:00.124Z'],
     [EARLIEST_INSTANT, 'from', '1900-01-01T00:00:00.000Z'],
+    // the last moment toISOString prints with four year digits
+    ['9999-12-31T23:59:59.999Z', 'to', '9999-12-31T23:59:59.999Z'],
   ] as const)('%s as a %s bound → %s', (raw, bound, instant) =>
     expect(readBound(raw, bound)).toBe(instant),
   );
@@ -222,6 +228,13 @@ describe('parseReadBound', () => {
     ],
     // the same 1900 floor as writes
     [beforeEarliest, 'from', earliestMessage(beforeEarliest)],
+    // past year 9999, written out or after rounding up (final review B1)
+    ['+010000-01-01T00:00:00Z', 'to', latestMessage('+010000-01-01T00:00:00Z')],
+    [
+      '9999-12-31T23:59:59.9991Z',
+      'from',
+      latestMessage('9999-12-31T23:59:59.9991Z'),
+    ],
   ] as const)(
     '%s as a %s bound → 400 with its message',
     (raw, bound, message) =>

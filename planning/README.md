@@ -1,5 +1,9 @@
 # Planning — Everfit Backend Take-Home (Workout Logging API)
 
+> This folder is the record as written before implementation. The result is described in the repository's
+> `README.md`; what happened during the build is in `AI_WORKFLOW.md` and in the implementation log of
+> `06-ai-workflow-seed.md`.
+
 Status: **design revised after debate rounds 1 and 2, again for the
 owner's catalog requirement (the exercise catalog is in the database, with
 admin endpoints), and again after debate round 3, which reviewed the catalog

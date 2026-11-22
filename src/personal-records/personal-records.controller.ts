@@ -24,7 +24,7 @@ import { PersonalRecordsService } from './personal-records.service';
   description: 'An opaque id: 1 to 64 characters of A-Z a-z 0-9 _ . -.',
   example: 'u_123',
 })
-@Controller('users/:userId/personal-records')
+@Controller('v1/users/:userId/personal-records')
 export class PersonalRecordsController {
   constructor(private readonly service: PersonalRecordsService) {}
 

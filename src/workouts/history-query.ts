@@ -5,7 +5,8 @@ import { Check, FieldError } from '../common/problem';
 import { workoutEntries as e } from '../database/schema';
 import { pgArray } from '../database/sql';
 import { CatalogSnapshot } from '../exercises/catalog-snapshot';
-import { exerciseKey, muscleGroupName } from '../exercises/exercise-key';
+import { muscleGroupName } from '../exercises/exercise-key';
+import { readExerciseTerm } from '../exercises/name-rules';
 import { unsupportedUnitMessage } from '../units/is-supported-unit';
 import { UnitRegistry } from '../units/unit-registry';
 import { UnitCode } from '../units/weight-units';
@@ -83,8 +84,11 @@ export function readHistoryQuery(
     }
   }
 
-  if (q.exercise !== undefined)
-    value.term = escapeLike(exerciseKey(q.exercise));
+  if (q.exercise !== undefined) {
+    const term = readExerciseTerm(q.exercise, 'exercise');
+    if (term.ok) value.term = escapeLike(term.value);
+    else errors.push(...term.errors);
+  }
 
   if (q.unit !== undefined) {
     const unit = units.resolve(q.unit);

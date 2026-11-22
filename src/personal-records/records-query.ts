@@ -1,6 +1,6 @@
 import { SQL, sql } from 'drizzle-orm';
 import { Check, FieldError } from '../common/problem';
-import { exerciseKey } from '../exercises/exercise-key';
+import { readExerciseTerm } from '../exercises/name-rules';
 import { unsupportedUnitMessage } from '../units/is-supported-unit';
 import { UnitRegistry } from '../units/unit-registry';
 import { UnitCode } from '../units/weight-units';
@@ -20,13 +20,16 @@ export type RecordsQuery = RecordsRange & { key: string; unit: UnitCode };
 
 // What class-validator cannot check: the dates (the `+` repaired first, §8)
 // and the unit's canonical code. Every fault is reported at once. `q` has
-// passed RecordsQueryDto, so `exercise` is a non-empty string.
+// passed RecordsQueryDto, so `exercise` is a non-empty string; blank once
+// normalised is still refused.
 export function readRecordsQuery(
   q: RecordsQueryDto,
   units: UnitRegistry,
 ): Check<RecordsQuery> {
   const errors: FieldError[] = [];
-  const value: RecordsQuery = { key: exerciseKey(q.exercise), unit: 'kg' };
+  const term = readExerciseTerm(q.exercise, 'exercise');
+  if (!term.ok) errors.push(...term.errors);
+  const value: RecordsQuery = { key: term.ok ? term.value : '', unit: 'kg' };
 
   // An absent bound is no bound; parseReadBound would refuse undefined.
   for (const bound of ['from', 'to'] as const) {

@@ -21,7 +21,7 @@ class ProbeDto {
 
 // Test-only routes that exercise the global layer: body parser, validation
 // pipe and problem filter.
-@Controller('probe')
+@Controller('v1/probe')
 export class ProbeController {
   @Post()
   @HttpCode(200)

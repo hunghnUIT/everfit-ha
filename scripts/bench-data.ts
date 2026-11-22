@@ -49,7 +49,8 @@ const GROUP_PRIORITY = [
 // Session sizes cycle through these (5–12 entries, mean 8.5, as real logging
 // groups them); the tail is adjusted so the total is exact.
 const SIZE_PATTERN = [8, 5, 11, 7, 12, 6, 9, 10];
-// Offsets the clients wrote, in minutes; none is 0, which would be stored as NULL.
+// Offsets the clients wrote, in minutes. None is 0; +00:00 would be stored as 0,
+// and only Z or -00:00 as NULL (design §8).
 const OFFSETS = [420, -480, -300, 60, 120, 330, 540, -420];
 
 type CatalogExercise = { key: string; name: string; primaryGroup: string };

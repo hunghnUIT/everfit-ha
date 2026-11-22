@@ -3,6 +3,7 @@ import isError from 'lodash/isError';
 import {
   EARLIEST_INSTANT,
   FUTURE_TOLERANCE_MS,
+  LATEST_INSTANT,
   MAX_UTC_OFFSET_MINUTES,
   MIN_UTC_OFFSET_MINUTES,
 } from '../../common/limits';
@@ -12,6 +13,7 @@ import { Check, FieldError } from '../../common/problem';
 // below read only what Temporal does not expose.
 
 const EARLIEST = Temporal.Instant.from(EARLIEST_INSTANT);
+const LATEST = Temporal.Instant.from(LATEST_INSTANT);
 const Z_ADVICE = 'Z means UTC, not your local time.';
 
 // The offset an instant was written with: Temporal parses it but does not
@@ -113,6 +115,10 @@ const earliestMessage = (raw: string) =>
   `'${raw}' is before ${EARLIEST_INSTANT}, the earliest moment accepted. ` +
   'Check the year.';
 
+const latestMessage = (raw: string) =>
+  `'${raw}' is after ${LATEST_INSTANT}, the latest moment accepted. ` +
+  'Check the year.';
+
 const toDate = (instant: Temporal.Instant) =>
   new Date(instant.epochMilliseconds);
 
@@ -161,7 +167,9 @@ export function parseWriteDate(
 
 // A `from` or `to` query bound: rounded up to the millisecond, so that
 // `from <= performed_at < to` holds for stored millisecond values; not before
-// 1900, no upper limit.
+// 1900, and not after LATEST_INSTANT once rounded. Design §8 says "no upper
+// limit"; the year-9999 bound is a controller ruling (final review B1), since
+// a later instant reached PostgreSQL as a six-digit year and answered 500.
 export function parseReadBound(
   raw: unknown,
   path: string,
@@ -179,6 +187,9 @@ export function parseReadBound(
   });
   if (Temporal.Instant.compare(instant, EARLIEST) < 0) {
     return failure(path, earliestMessage(parsed.value.text));
+  }
+  if (Temporal.Instant.compare(instant, LATEST) > 0) {
+    return failure(path, latestMessage(parsed.value.text));
   }
   return { ok: true, value: toDate(instant) };
 }

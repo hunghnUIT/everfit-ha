@@ -38,7 +38,7 @@ const OPEN =
 // the transaction are CatalogService's.
 // import { AdminOnly } from '../common/admin-token.guard';   // ← 1. uncomment
 @ApiTags('Admin — catalog (UNAUTHENTICATED)')
-@Controller('admin')
+@Controller('v1/admin')
 // @AdminOnly()                                               // ← 2. uncomment, and set ADMIN_API_TOKEN
 export class CatalogAdminController {
   constructor(private readonly service: CatalogService) {}

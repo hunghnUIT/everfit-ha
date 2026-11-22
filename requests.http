@@ -2,7 +2,7 @@
 ###
 ### Open this file in VS Code (REST Client extension) or an editor with an
 ### .http runner, with `docker compose up` running. Send each request with
-### its "Send Request" link. Three requests read a value from an earlier one
+### its "Send Request" link. Two requests read a value from an earlier one
 ### (`{{logOne.response.body.data.id}}` and the cursor of `firstPage`), so
 ### send those first; the `{{name.response.body…}}` form is the REST Client
 ### extension's. Every date below is a full date-time with an offset, as
@@ -166,16 +166,35 @@ GET {{host}}/v1/users/{{user}}/personal-records?exercise=Bench%20Press&from=2025
 ### Part of a name finds nothing here: a 200 with null records and a hint
 GET {{host}}/v1/users/{{user}}/personal-records?exercise=bench
 
-### This period against the one before it, with the change in each record.
+### A January session, so the comparison below has a period to compare with
+POST {{host}}/v1/users/{{user}}/workout-entries
+Content-Type: application/json
+
+{
+  "date": "2025-01-15T18:00:00+07:00",
+  "exerciseName": "Bench Press",
+  "sets": [
+    { "reps": 10, "weight": 95, "unit": "kg" },
+    { "reps": 4, "weight": 112.5, "unit": "kg" },
+    { "reps": 2, "weight": 115, "unit": "kg" }
+  ]
+}
+
+### This period against the one before it, with the change in each record:
+### February against January gives the README's example (+5, +50, +5.83).
 ### All four bounds are required; to is excluded, and this period's start is
 ### the other's end.
 GET {{host}}/v1/users/{{user}}/personal-records/compare?exercise=Bench%20Press&from=2025-02-01T00:00:00Z&to=2025-03-01T00:00:00Z&compareFrom=2025-01-01T00:00:00Z&compareTo=2025-02-01T00:00:00Z&unit=kg
+
+### A period with no entries is not an error: March has no Bench Press, so
+### its records and every delta are null, and the message names that period
+GET {{host}}/v1/users/{{user}}/personal-records/compare?exercise=Bench%20Press&from=2025-03-01T00:00:00Z&to=2025-04-01T00:00:00Z&compareFrom=2025-02-01T00:00:00Z&compareTo=2025-03-01T00:00:00Z&unit=kg
 
 ### A missing bound is one 400 that lists every missing parameter
 GET {{host}}/v1/users/{{user}}/personal-records/compare?exercise=Bench%20Press&from=2025-02-01T00:00:00Z
 
 ### ---------------------------------------------------------------------
-### Catalog administration: THESE FIVE CALLS ARE OPEN.
+### Catalog administration: THESE CALLS ARE OPEN.
 ### In the version as delivered they are unauthenticated: anyone who can
 ### reach the API can change the catalog. See the README, "Catalog
 ### administration", for the two lines that switch the token guard on. When

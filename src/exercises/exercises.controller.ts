@@ -9,6 +9,7 @@ import {
   MuscleGroupsEnvelopeDto,
 } from './dto/catalog-response.dto';
 import { exerciseKey } from './exercise-key';
+import { hasNul } from './name-rules';
 
 function toBody(row: CatalogExerciseRow) {
   return {
@@ -23,7 +24,7 @@ function toBody(row: CatalogExerciseRow) {
 // The public catalog routes (design §10.4). They read the tables, not the
 // snapshot, and take no query parameters.
 @ApiTags('catalog')
-@Controller()
+@Controller('v1')
 export class ExercisesController {
   constructor(private readonly repository: CatalogRepository) {}
 
@@ -41,7 +42,8 @@ export class ExercisesController {
   }
 
   // The path value arrives URL-decoded and goes through the key function, so
-  // "Bench%20Press" and "bench%20press" are the same resource (§10.1).
+  // "Bench%20Press" and "bench%20press" are the same resource (§10.1). A key
+  // with NUL cannot be stored, so it is not found without a query.
   @Get('exercises/:exerciseKey')
   @ApiOperation({ summary: 'One catalog exercise' })
   @ApiOkResponse({
@@ -51,7 +53,9 @@ export class ExercisesController {
   @ApiProblems(404)
   async findOne(@Param('exerciseKey') value: string) {
     const key = exerciseKey(value);
-    const row = await this.repository.findExercise(key);
+    const row = hasNul(key)
+      ? undefined
+      : await this.repository.findExercise(key);
     if (!row) {
       throw new ApiProblem(
         404,

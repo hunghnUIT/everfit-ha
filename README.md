@@ -287,9 +287,10 @@ user has no entries and gets a 200 with an empty result.
 On the four routes that read query parameters (history, one entry, PRs and
 compare), a parameter the route does not accept is a 400 that names it and
 lists the accepted ones, and a parameter sent twice, or with an empty value, is
-a 400 too. Otherwise `?exerciseName=bench` (the body's field name) would return
+a 400 too; so is an `exercise` of spaces only, or one holding the NUL
+character. Otherwise `?exerciseName=bench` (the body's field name) would return
 the unfiltered list, which reads as an answer. Every response is documented in
-`/docs`, including each route's problem responses; every example there, and in
+`/docs`, including each route's 4xx responses; every example there, and in
 this README and `requests.http`, is a full date-time with an offset.
 
 ### What a first request looks like
@@ -514,7 +515,10 @@ back as `224.99 lb`. A delta is computed from exact values, so it can differ by
 
 **Units.** The single list is `src/units/weight-units.ts`; the validator, the
 OpenAPI text, the error message and `GET /v1/units` all read it. Adding stone is
-one line (a commented example is in the file), with no migration. On input
+one line (a commented example is in the file), with no migration and no other
+change in `src/` (lint and the type check pass with the line uncommented)
+**[V]**. The tests and examples that use `stone` as the unsupported unit then
+need another example: as written, 9 unit tests fail **[V]**. On input
 `unit` is a case-insensitive string (`lb`, `LB`, `lbs`, `kg`, `kgs`, ...), so
 "lbs" works; on output it is always the canonical code, and in OpenAPI it is an
 enum there and a free string on input (an input enum would tell a generated
@@ -566,7 +570,7 @@ an offset. The response carries `"date"` (the stored instant) and `"utcOffset"`.
 | a number such as `1739165400000` | 400: the field is a string | |
 
 - **The offset is for display, never for logic.** `Z` and `-00:00` mean "UTC known,
-  local offset unknown" (RFC 9557) **[V]**, so `utcOffset` is `null`, which is what
+  local offset unknown" (RFC 9557) **[K]**, so `utcOffset` is `null`, which is what
   every JavaScript client sending `toISOString()` produces. A client that wants the
   athlete's clock shown sends its local offset instead of `Z`:
   `Temporal.Now.zonedDateTimeISO().toString({ smallestUnit: 'millisecond', timeZoneName: 'never' })`
@@ -611,7 +615,11 @@ an offset. The response carries `"date"` (the stored instant) and `"utcOffset"`.
   leave a gap. A date alone is a 400 that shows what to send (on `to`, "to include all
   of 2025-02-28, send the start of the next day"; on `from`, "to start at 2025-02-01,
   send the start of that day"). Bounds with finer digits are rounded up to the next
-  millisecond.
+  millisecond. A bound is accepted from `1900-01-01T00:00:00Z` to
+  `9999-12-31T23:59:59.999Z` after rounding; outside them it is a 400 on the bound.
+  The upper limit is not in the design, which says reads have none: a later instant
+  reached PostgreSQL as a six-digit year and answered 500, and nothing is stored that
+  late, so no answer changes (a ruling of the final review).
 - **A `+` in a query string arrives as a space.** `from=…T00:00:00+07:00` reaches the
   server as `…T00:00:00 07:00` **[V]**, the likely failure of a first ranged curl. After
   a time, a space followed by an offset has no other meaning, so the server reads it as
@@ -735,8 +743,8 @@ mapping would miss **[V]**.
 
 | Index | Serves |
 |---|---|
-| `ix_entries_history (user_id, performed_at DESC, id DESC) INCLUDE (exercise_key)` | History order, keyset pagination and the date range. `INCLUDE` lets the name and muscle-group filters be evaluated from the index, **because the history query is two-step**: ids first (index-only), then the rows by primary key. |
-| `ix_entries_exercise (user_id, exercise_key, performed_at DESC, id DESC)` | The entry side of the PR join: one range scan per period, read from the index alone. |
+| `ix_entries_history (user_id, performed_at DESC, id DESC) INCLUDE (exercise_key)` | History order, keyset pagination and the date range. `INCLUDE` lets the name and muscle-group filters be evaluated from the index, **because the history query is two-step**: ids first (index-only), then the rows by primary key. In the committed benchmark the planner also chose it for the entry side of the heavy user's all-time and one-year PR join: a parallel index-only scan of the user's entries that filters `exercise_key` from the `INCLUDE` column (see "The PR plan") **[V]**. |
+| `ix_entries_exercise (user_id, exercise_key, performed_at DESC, id DESC)` | Designed as the entry side of the PR join: one range scan of one exercise per period, read from the index alone. In the committed benchmark the planner used it for compare's one-month windows and for the history term that matches nothing, not for the long PR periods **[V]**. The planner's choice is its own, and the report records it (design §9.3). |
 | `workout_sets` primary key `(entry_id, set_number)` | The set side of the PR join and loading the sets of a page of entries. |
 
 Two secondary indexes on the write-hot table are the whole indexing budget. No trigram index, no stored
@@ -868,6 +876,14 @@ bench up bench`, or `npm run bench:data`):
 - **The single-exercise user** (`bench-single`): 50 000 entries of one exercise (150 000 set rows). Not a lifter, but
   exactly what a reviewer's quick seed loop produces; a "does not fall over" check that does not drive the schema.
 
+**To rerun it**, load the data, then point the runner at the compose database and the running API (`BENCH_BASE_URL`
+when the API is not on port 3000); `npm run bench` alone stops with "DATABASE_URL is not set":
+
+```bash
+docker compose --profile bench up bench
+DATABASE_URL=postgres://workout:workout@127.0.0.1:55432/workout npm run bench
+```
+
 **Method, printed with every figure** (the figures below are from `bench/report.md`, which `npm run bench` rewrites):
 local Docker, warm cache, **50 warm-up requests discarded, 500 measured requests per case, concurrency 1 and again at
 8, Docker given 8 CPUs and 7.7 GiB of memory**, times are wall-clock over HTTP with the body included, percentiles from
@@ -933,15 +949,20 @@ all-time PR case. The other two read the same data in both passes, and their pas
 run-to-run noise.
 
 **Every budget passes at concurrency 1, in both passes, so no fallback was applied.** The first-page history
-plan is an index-only scan of `ix_entries_history` for the 21 rows (`Execution Time: 0.19 ms`, 39 heap fetches; in
+plan is an index-only scan of `ix_entries_history` for the 21 rows (`Execution Time: 0.19 ms`, 21 heap fetches; in
 pass 2 the all-time PR plan shows 5 039 heap fetches on the entry side, the fresh rows no vacuum has marked yet). The no-match term
 scans `ix_entries_exercise` with a filter (50 000 rows removed, 4.1 ms): a search-as-you-type typo costs one pass over
 the user's entry keys, not the heap.
 
-**The PR plan** (all-time, heavy user): the join is a **Nested Loop**, a parallel index-only scan of entries on the
-entry side (3 309 entries) and 3 309 primary-key lookups on the set side (an Index Scan that reads the heap, so there
-is no heap-fetch counter), producing 26 471 rows into a materialised CTE that the three top-1 picks read; 28 ms of
-execution; **no temporary files**. For the single-exercise user (50 000 entries, 150 000 set rows, 50 000 loops) the
+**The PR plan** (all-time, heavy user): the join is a **Nested Loop**. On the entry side the planner chose a parallel
+index-only scan of **`ix_entries_history`, not `ix_entries_exercise`**: three processes read the user's entries in date
+order and filter `exercise_key` from the `INCLUDE` column, keeping 3 309 and discarding about 46 700 (`Rows Removed by
+Filter: 15564` in each, about 1.4 ms) **[V]**. The same choice appears in every PR case of both users in both passes,
+the one-year window included; `ix_entries_exercise` serves compare's one-month windows. A likely reason, not measured:
+one exercise's range in `ix_entries_exercise` is too small to split across parallel workers, and the planner
+parallelises to spread the 3 309 primary-key lookups **[U]**. On the set side are 3 309 primary-key lookups (an Index
+Scan that reads the heap, so there is no heap-fetch counter), producing 26 471 rows into a materialised CTE that the
+three top-1 picks read; 28 ms of execution; **no temporary files**. For the single-exercise user (50 000 entries, 150 000 set rows, 50 000 loops) the
 CTE does not fit in `work_mem` and spills: **the CTE's tuplestore wrote 880 blocks, about 7 MB** (`Storage: Disk
 Maximum Storage: 7036kB`), and the query still answers in 115 ms p95, inside its 500 ms budget.
 
@@ -967,6 +988,10 @@ plus up to six primary-key loads in one transaction, so its HTTP time covers bot
 - **Append-only, no edit or delete of entries**, no content dedupe, no idempotency key. Each is a named next step.
 - **Free text, not a catalog reference**, for the exercise: partial match covers discovery in history; there are no
   aliases ("bench" does not become "bench press"), because alias merging changes PR results in ways that need product rules.
+- **A statement timeout, but no connect or client-side query timeout.** A statement that runs too long is cancelled
+  (`DB_STATEMENT_TIMEOUT_MS`), but a database that accepts connections and never answers holds every request,
+  `/health/ready` included, until the caller gives up (the final review paused the database container and got no
+  answer in 12 s) **[V]**.
 - **No rate limiting, no authentication, no metrics or tracing**: gateway and platform concerns, out of scope for v1.
 
 ## At scale
@@ -1014,7 +1039,8 @@ response is never a mixture of two versions.
 - **How a change spreads.** The replica that handled an admin write reloads after the write commits, before it responds.
   Every replica also reloads the whole catalog every `CATALOG_REFRESH_SECONDS` (default 300), on a timer chain that
   never overlaps itself. So a change shows at once on one replica and within five minutes on the others. A full load of
-  300 exercises, 40 groups and 900 links took 2.6 ms and 26 KB on PostgreSQL 18.7 **[V]**, so the interval comes from how
+  300 exercises, 40 groups and 900 links took 2.6 ms and 26 KB on PGlite 0.5.17, the PostgreSQL 18.7 engine running
+  inside Node with no network **[V]**, so the interval comes from how
   stale tags on other replicas may be, not from cost.
 - **At boot** the first load runs before the process listens, retries for about ten seconds, and exits non-zero if it
   cannot get one (compose restarts it).

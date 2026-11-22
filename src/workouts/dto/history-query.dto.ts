@@ -20,8 +20,9 @@ import { SHARED_UNIT_REGISTRY } from '../../units/unit-registry';
 
 const BOUND_DESCRIPTION =
   'An RFC 3339 date-time with Z or a UTC offset (some ISO 8601 variants are ' +
-  'tolerated), not before 1900-01-01T00:00:00Z. The range is half-open: ' +
-  'from is included, to is not. Each bound is usable alone.';
+  'tolerated), from 1900-01-01T00:00:00Z to 9999-12-31T23:59:59.999Z. The ' +
+  'range is half-open: from is included, to is not. Each bound is usable ' +
+  'alone.';
 
 // The query of GET …/workout-entries (design §9.2). class-validator checks
 // presence, types and ranges; readHistoryQuery checks what it cannot: the
