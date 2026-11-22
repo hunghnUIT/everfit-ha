@@ -215,13 +215,15 @@ describe('time (design §8)', () => {
     const c = '2025-02-03T00:00:00.000Z';
     // The same entries as the PRs test: in each period the entry at its from
     // holds the heaviest set and the one a millisecond before its to the
-    // highest volume; the two outside would win every record if let in.
+    // highest volume; the two outside would win every record if let in. The
+    // entry at b is heavier than the one at a, so an inclusive compareTo
+    // would let it win the comparison period's heaviest set, not tie.
     const at = async (date: string, weight: number, reps: number) =>
       (await log(userId, date, [{ reps, weight, unit: 'kg' }])).id;
     const beforeA = await at('2025-01-31T23:59:59.999Z', 150, 10);
     const atA = await at(a, 120, 1);
     const beforeB = await at('2025-02-01T23:59:59.999Z', 80, 10);
-    const atB = await at(b, 120, 1);
+    const atB = await at(b, 130, 1);
     const beforeC = await at('2025-02-02T23:59:59.999Z', 80, 10);
     const atC = await at(c, 150, 10);
 

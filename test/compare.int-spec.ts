@@ -214,6 +214,24 @@ describe('PR comparison (design §9.4)', () => {
     ).not.toContain(jan);
   });
 
+  // The comparison pair gets the current pair's range check (Task 15 review).
+  it.each([
+    ['after', { from: JAN.to, to: JAN.from }],
+    ['equal to', { from: JAN.from, to: JAN.from }],
+  ])('compareFrom %s compareTo → 400 on compareFrom', async (_, previous) => {
+    const res = withStatus(
+      await compare(uniqueUserId(), periods(FEB, previous)),
+      400,
+    );
+    expect(res.body.errors).toEqual([
+      {
+        path: 'compareFrom',
+        message:
+          'compareFrom must be earlier than compareTo: compareFrom is included and compareTo is not, so this range is empty.',
+      },
+    ]);
+  });
+
   // Review Focus 5
   it('missing compareFrom and to → one 400 listing both', async () => {
     const res = withStatus(
