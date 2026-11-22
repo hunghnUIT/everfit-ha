@@ -3,35 +3,20 @@ import request from 'supertest';
 import { CLOCK, fixedClock } from '../src/common/clock';
 import { createTestApp } from './support/app';
 import { query } from './support/database';
-import { entryBody, postEntry, uniqueUserId } from './support/fixtures';
+import {
+  entryBody,
+  NOW,
+  postEntry,
+  PROBLEM_JSON,
+  rowsFor,
+  uniqueUserId,
+  withStatus,
+} from './support/fixtures';
 
-const PROBLEM_JSON = /^application\/problem\+json/;
 // An instant as the API prints it: UTC, with milliseconds.
 const ISO_MS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const UUID_V7 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-
-// The design's fixed "now" (§8): the §9.1 sample is 4.5 hours before it.
-const NOW = '2025-02-11T03:00:00Z';
-
-// The response, after its status is checked; on a mismatch Jest shows the body.
-function withStatus(res: request.Response, status: number) {
-  expect({ status: res.status, body: res.body }).toMatchObject({ status });
-  return res;
-}
-
-// The rows stored for one user, in both tables: "nothing written" is checked
-// in the database, not only by the status code.
-async function rowsFor(userId: string) {
-  const [counts] = await query<{ entries: number; sets: number }>(
-    `SELECT (SELECT count(*)::int FROM workout_entries WHERE user_id = $1) AS entries,
-            (SELECT count(*)::int FROM workout_sets s
-               JOIN workout_entries e ON e.id = s.entry_id
-              WHERE e.user_id = $1) AS sets`,
-    [userId],
-  );
-  return counts;
-}
 
 describe('log one entry (design §9.1)', () => {
   let app: INestApplication;

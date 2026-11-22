@@ -1,6 +1,38 @@
 import { INestApplication } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
+import { query } from './database';
+
+export const PROBLEM_JSON = /^application\/problem\+json/;
+
+// The fixed "now" the plan's date tests use. Every sample date in the entry
+// tests lies before it, and the write rule refuses a date more than 15
+// minutes after it.
+export const NOW = '2025-02-11T03:00:00Z';
+
+// The response, after its status is checked; on a mismatch Jest shows the body.
+export function withStatus(
+  res: request.Response,
+  status: number,
+): request.Response {
+  expect({ status: res.status, body: res.body }).toMatchObject({ status });
+  return res;
+}
+
+// The rows stored for one user, in both tables: "nothing written" is checked
+// in the database, not only by the status code.
+export async function rowsFor(
+  userId: string,
+): Promise<{ entries: number; sets: number }> {
+  const [counts] = await query<{ entries: number; sets: number }>(
+    `SELECT (SELECT count(*)::int FROM workout_entries WHERE user_id = $1) AS entries,
+            (SELECT count(*)::int FROM workout_sets s
+               JOIN workout_entries e ON e.id = s.entry_id
+              WHERE e.user_id = $1) AS sets`,
+    [userId],
+  );
+  return counts;
+}
 
 // A userId no other test uses, so the tests of one file never see each
 // other's rows. Eight hex characters keep it far inside the 64-character rule.

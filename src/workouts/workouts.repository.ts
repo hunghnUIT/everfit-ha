@@ -4,7 +4,13 @@ import { workoutEntries, workoutSets } from '../database/schema';
 import { DB, type Database, type Executor } from '../database/tokens';
 import { UNIT_REGISTRY, UnitRegistry } from '../units/unit-registry';
 import { NewEntry, NewSet } from './entry-input';
-import { StoredEntry } from './entry-response';
+
+// An entry as the repository reads it back: the weights are the database's
+// exact decimal strings, and createdAt is the database's default.
+export type StoredEntry = Omit<NewEntry, 'sets'> & {
+  createdAt: Date;
+  sets: NewSet[];
+};
 
 // SQL only. Every statement is built by Drizzle and parameterised. Each method
 // runs on the database or on a transaction the caller opened (`executor`), so

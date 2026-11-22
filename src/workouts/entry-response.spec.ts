@@ -1,6 +1,7 @@
 import { CatalogSnapshot } from '../exercises/catalog-snapshot';
 import { UnitRegistry } from '../units/unit-registry';
-import { StoredEntry, toEntryResponse } from './entry-response';
+import { toEntryResponse } from './entry-response';
+import type { StoredEntry } from './workouts.repository';
 
 const units = new UnitRegistry();
 

@@ -3,32 +3,15 @@ import request from 'supertest';
 import { CLOCK, fixedClock } from '../src/common/clock';
 import { SHAPE_MESSAGES } from '../src/workouts/dto/entry-input.dto';
 import { createTestApp } from './support/app';
-import { query } from './support/database';
-import { entryBody, postEntry, uniqueUserId } from './support/fixtures';
-
-const PROBLEM_JSON = /^application\/problem\+json/;
-
-// The design's fixed "now" (§8): the §9.1 sample is 4.5 hours before it.
-const NOW = '2025-02-11T03:00:00Z';
-
-// The response, after its status is checked; on a mismatch Jest shows the body.
-function withStatus(res: request.Response, status: number) {
-  expect({ status: res.status, body: res.body }).toMatchObject({ status });
-  return res;
-}
-
-// The rows stored for one user, in both tables: "nothing written" is checked
-// in the database, not only by the status code.
-async function rowsFor(userId: string) {
-  const [counts] = await query<{ entries: number; sets: number }>(
-    `SELECT (SELECT count(*)::int FROM workout_entries WHERE user_id = $1) AS entries,
-            (SELECT count(*)::int FROM workout_sets s
-               JOIN workout_entries e ON e.id = s.entry_id
-              WHERE e.user_id = $1) AS sets`,
-    [userId],
-  );
-  return counts;
-}
+import {
+  entryBody,
+  NOW,
+  postEntry,
+  PROBLEM_JSON,
+  rowsFor,
+  uniqueUserId,
+  withStatus,
+} from './support/fixtures';
 
 // The first request a reviewer sends (design §12, the first-request row).
 describe('the first request', () => {

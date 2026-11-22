@@ -3,14 +3,8 @@ import { CatalogSnapshot } from '../exercises/catalog-snapshot';
 import { UnitRegistry } from '../units/unit-registry';
 import { UnitCode } from '../units/weight-units';
 import { formatUtcOffset } from './domain/dates';
-import { NewEntry, NewSet } from './entry-input';
-
-// An entry as the repository reads it back: the weights are the database's
-// exact decimal strings, and createdAt is the database's default.
-export type StoredEntry = Omit<NewEntry, 'sets'> & {
-  createdAt: Date;
-  sets: NewSet[];
-};
+import { NewSet } from './entry-input';
+import type { StoredEntry } from './workouts.repository';
 
 export type SetResponse = {
   setNumber: number;
