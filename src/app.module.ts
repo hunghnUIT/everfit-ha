@@ -4,6 +4,7 @@ import { LoggerModule } from 'nestjs-pino';
 import { loggerParams } from './common/logger';
 import { ApiEnv, validateApiEnv } from './config/env';
 import { DatabaseModule } from './database/database.module';
+import { ExercisesModule } from './exercises/exercises.module';
 import { HealthModule } from './health/health.module';
 import { UnitsModule } from './units/units.module';
 
@@ -16,6 +17,7 @@ import { UnitsModule } from './units/units.module';
         loggerParams({ LOG_LEVEL: config.get('LOG_LEVEL', { infer: true }) }),
     }),
     DatabaseModule,
+    ExercisesModule,
     HealthModule,
     UnitsModule,
   ],
