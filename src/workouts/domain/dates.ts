@@ -48,13 +48,15 @@ const writeDateAlone: Advice = (raw, day) =>
   `unknown. Add the time and your UTC offset, for example ` +
   `${day.toString()}T09:00:00+07:00. ${Z_ADVICE}`;
 
-const toDateAlone: Advice = (_raw, day) =>
-  `to include all of ${day.toString()}, send the start of the next day, ` +
-  `for example ${day.add({ days: 1 }).toString()}T00:00:00+07:00`;
+// Read bounds: what is wrong, then §8's advice for each bound verbatim.
+const toDateAlone: Advice = (raw, day) =>
+  `'${raw}' has no time or UTC offset: to include all of ${day.toString()}, ` +
+  `send the start of the next day, for example ` +
+  `${day.add({ days: 1 }).toString()}T00:00:00+07:00.`;
 
-const fromDateAlone: Advice = (_raw, day) =>
-  `to start at ${day.toString()}, send the start of that day, ` +
-  `for example ${day.toString()}T00:00:00+07:00`;
+const fromDateAlone: Advice = (raw, day) =>
+  `'${raw}' has no time or UTC offset: to start at ${day.toString()}, ` +
+  `send the start of that day, for example ${day.toString()}T00:00:00+07:00.`;
 
 // Why Temporal.Instant.from refused the text, in the order of §8 and the plan:
 // a date alone, then a date-time with no offset, then anything else.
@@ -131,14 +133,21 @@ export function parseWriteDate(
     smallestUnit: 'millisecond',
     roundingMode: 'floor',
   });
+  const utcOffsetMinutes = readOffsetMinutes(text);
   const latest = now.add({ milliseconds: FUTURE_TOLERANCE_MS });
   if (Temporal.Instant.compare(instant, latest) > 0) {
+    // A local time sent with Z is the likely cause only when the text was
+    // written as UTC; an explicit offset is not blamed on Z.
+    const zCause =
+      utcOffsetMinutes === null || utcOffsetMinutes === 0
+        ? ' A local time sent with Z is the likely cause: Z means UTC, so ' +
+          'send your UTC offset instead, for example +07:00.'
+        : '';
     return failure(
       path,
       `'${text}' is more than ${FUTURE_TOLERANCE_MS / 60_000} minutes after ` +
-        `the server's time, ${now.toString({ smallestUnit: 'millisecond' })}. ` +
-        'A local time sent with Z is the likely cause: Z means UTC, so send ' +
-        'your UTC offset instead, for example +07:00.',
+        `the server's time, ${now.toString({ smallestUnit: 'millisecond' })}.` +
+        zCause,
     );
   }
   if (Temporal.Instant.compare(instant, EARLIEST) < 0) {
@@ -148,7 +157,7 @@ export function parseWriteDate(
     ok: true,
     value: {
       performedAt: toDate(instant),
-      utcOffsetMinutes: readOffsetMinutes(text),
+      utcOffsetMinutes,
     },
   };
 }

@@ -71,6 +71,9 @@ describe('parseWriteDate', () => {
     ['2025-02-10T05:30:00-07:00', '2025-02-10T12:30:00.000Z', -420],
     ['2025-02-10T05:30:00+05:45', '2025-02-09T23:45:00.000Z', 345],
     ['2025-02-10T12:30:00-00:00', '2025-02-10T12:30:00.000Z', null],
+    // the ends of the offset range, −12:00 and +14:00
+    ['2025-02-10T05:30:00+14:00', '2025-02-09T15:30:00.000Z', 840],
+    ['2025-02-10T05:30:00-12:00', '2025-02-10T17:30:00.000Z', -720],
     // accepted ISO 8601 variants
     ['2025-02-10 05:30:00+07:00', '2025-02-09T22:30:00.000Z', 420],
     ['2025-02-10t05:30:00z', '2025-02-10T05:30:00.000Z', null],
@@ -105,6 +108,8 @@ describe('parseWriteDate', () => {
     ],
     // an offset that does not exist, or not in whole minutes
     ['2025-02-10T05:30:00+15:00', offsetMessage('2025-02-10T05:30:00+15:00')],
+    ['2025-02-10T05:30:00+14:01', offsetMessage('2025-02-10T05:30:00+14:01')],
+    ['2025-02-10T05:30:00-12:01', offsetMessage('2025-02-10T05:30:00-12:01')],
     [
       '2025-02-10T05:30:00+07:00:30',
       offsetMessage('2025-02-10T05:30:00+07:00:30'),
@@ -140,22 +145,25 @@ describe('parseWriteDate', () => {
         null,
       ]));
 
-    it('refuses now + 15 minutes 1 ms, showing the server time and naming Z', () => {
-      const raw = now.add({ minutes: 15, milliseconds: 1 }).toString();
+    const futureMessage = (raw: string) =>
+      `'${raw}' is more than 15 minutes after the server's time, ` +
+      '2025-02-11T03:00:00.000Z.';
+    const zSentence =
+      ' A local time sent with Z is the likely cause: Z means UTC, so send ' +
+      'your UTC offset instead, for example +07:00.';
+
+    // now + 15 min + 1 ms, written as UTC (Z, +00:00) and with an offset;
+    // only a text written as UTC gets the sentence about Z
+    it.each([
+      ['2025-02-11T03:15:00.001Z', zSentence],
+      ['2025-02-11T03:15:00.001+00:00', zSentence],
+      ['2025-02-11T10:15:00.001+07:00', ''],
+    ])('refuses %s, showing the server time', (raw, tail) =>
       expect(parseWriteDate(raw, 'date', now)).toEqual({
         ok: false,
-        errors: [
-          {
-            path: 'date',
-            message:
-              `'${raw}' is more than 15 minutes after the server's time, ` +
-              '2025-02-11T03:00:00.000Z. A local time sent with Z is the ' +
-              'likely cause: Z means UTC, so send your UTC offset instead, ' +
-              'for example +07:00.',
-          },
-        ],
-      });
-    });
+        errors: [{ path: 'date', message: futureMessage(raw) + tail }],
+      }),
+    );
 
     it('accepts 1900-01-01T00:00:00Z', () =>
       expect(written(EARLIEST_INSTANT)).toEqual([
@@ -184,18 +192,27 @@ describe('parseReadBound', () => {
   );
 
   it.each([
-    // a date alone: exactly the §8 advice for each bound
+    // a date alone: what is wrong, then the §8 advice for each bound
     [
       '2025-02-28',
       'to',
-      'to include all of 2025-02-28, send the start of the next day, for ' +
-        'example 2025-03-01T00:00:00+07:00',
+      "'2025-02-28' has no time or UTC offset: to include all of " +
+        '2025-02-28, send the start of the next day, for example ' +
+        '2025-03-01T00:00:00+07:00.',
     ],
     [
       '2025-02-01',
       'from',
-      'to start at 2025-02-01, send the start of that day, for example ' +
-        '2025-02-01T00:00:00+07:00',
+      "'2025-02-01' has no time or UTC offset: to start at 2025-02-01, " +
+        'send the start of that day, for example 2025-02-01T00:00:00+07:00.',
+    ],
+    // compact: the text as sent is quoted, the day is in extended form
+    [
+      '20250228',
+      'to',
+      "'20250228' has no time or UTC offset: to include all of " +
+        '2025-02-28, send the start of the next day, for example ' +
+        '2025-03-01T00:00:00+07:00.',
     ],
     // no offset: as on writes
     [
