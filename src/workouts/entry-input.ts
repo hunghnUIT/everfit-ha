@@ -44,9 +44,17 @@ type Deps = { units: UnitRegistry; now: Temporal.Instant };
 
 type Draft = Omit<NewEntry, 'id' | 'userId'>;
 
+// The separators the code's own paths have at most before their last part:
+// entries[i].sets[j].field.
+const MAX_PATH_SEPARATORS = 4;
+
 // Paths that failed, looked up with their ancestors: sets[0].unit counts as
-// failed when sets or sets[0] failed. A set keeps the lookup linear in the
-// number of errors; a scan per lookup made a body with many errors quadratic.
+// failed when sets or sets[0] failed. Only an ancestor the code builds can
+// have failed (entries[i], sets, sets[j]; an unknown property's error has no
+// children), so the walk stops after the first MAX_PATH_SEPARATORS separators.
+// A path can hold a client's property name, and one made of thousands of dots
+// or brackets would otherwise cost a slice and a hash per separator:
+// quadratic in the name. Bounded, a lookup is one pass over the path.
 // Hand-written: no library walks a path's ancestors in this notation.
 class FailedPaths {
   private readonly paths = new Set<string>();
@@ -56,13 +64,11 @@ class FailedPaths {
   }
 
   has(path: string): boolean {
-    for (let i = 0; i < path.length; i++) {
-      if (
-        (path[i] === '.' || path[i] === '[') &&
-        this.paths.has(path.slice(0, i))
-      ) {
-        return true;
-      }
+    let separators = 0;
+    for (let i = 0; i < path.length && separators < MAX_PATH_SEPARATORS; i++) {
+      if (path[i] !== '.' && path[i] !== '[') continue;
+      separators++;
+      if (this.paths.has(path.slice(0, i))) return true;
     }
     return this.paths.has(path);
   }
@@ -206,7 +212,11 @@ function readSet(
 
 // Turns a request body into validated entries, or into every field error of
 // the request at once (design §9.1). Pure: no Nest, no database; the clock
-// and the unit registry are passed in. Never throws for any JSON value.
+// and the unit registry are passed in. For any JSON value it returns a Check,
+// with one error per path, and leaves the value unchanged. The one exception:
+// a value nested deeper than class-transformer's recursion can walk (about
+// 1 200 levels) throws a RangeError, as it does in Nest's ValidationPipe on
+// every DTO route. No client sends that, and the 1 MB body limit bounds it.
 export function readEntryInputs(
   body: unknown,
   shape: 'single' | 'bulk',
@@ -228,7 +238,12 @@ export function readEntryInputs(
     };
   }
   // Over the cap, the one error and no per-item work, however many items.
-  if (Array.isArray(raw.entries) && raw.entries.length > MAX_BULK) {
+  // Only on /bulk: on the single route `entries` is an unknown property.
+  if (
+    shape === 'bulk' &&
+    Array.isArray(raw.entries) &&
+    raw.entries.length > MAX_BULK
+  ) {
     return {
       ok: false,
       errors: [{ path: 'entries', message: SHAPE_MESSAGES.entries }],

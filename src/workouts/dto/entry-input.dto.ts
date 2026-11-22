@@ -62,12 +62,15 @@ export const UTC_OFFSET_DESCRIPTION =
   'the client sent Z.';
 
 // Review Focus 1: a number sent as a string ("reps": "5") is refused, never
-// converted, and the message says the quotes are the fault. A short numeric
-// string is echoed as the fix; anything else gets a fixed example.
+// converted, and the message says the quotes are the fault. The client's text
+// is echoed as the fix only when it is exactly what JSON prints for that
+// number (so not "05", "5.", "-0" or "0.50"); otherwise a fixed example.
+// Number() here only tests the text for the message; the value stays a string.
 function numberMessage(example: number, otherwise: string) {
   return ({ property, value }: ValidationArguments): string => {
     if (typeof value !== 'string') return otherwise;
-    return /^-?\d{1,9}(\.\d{1,9})?$/.test(value)
+    const asNumber = Number(value);
+    return Number.isFinite(asNumber) && String(asNumber) === value
       ? `'${property}' must be a JSON number, not a string: send ${value}, not "${value}".`
       : `'${property}' must be a JSON number, not a string, for example ${example}.`;
   };

@@ -12,8 +12,10 @@ const deps = {
 
 const PATH_USER = 'u_123';
 
-// Ten times the measured time of the case it bounds (see the report).
+// At least ten times the measured time of the case each bounds (see the
+// report): about 155 ms, and under 3 ms for a 200 000-character name.
 const BUDGET_MS = 2_000;
+const LONG_NAME_BUDGET_MS = 100;
 
 // The request of design §9.1.
 const benchPress = () => ({
@@ -257,6 +259,74 @@ describe('readEntryInputs (design §9.1)', () => {
     expect(errors).toHaveLength(10_000);
     expect(elapsed).toBeLessThan(BUDGET_MS);
   });
+
+  // A property name is the client's text: a lookup must not cost more for a
+  // name made of the separators a path uses.
+  describe.each([
+    ['dots', '.'.repeat(200_000)],
+    ['brackets', '['.repeat(200_000)],
+  ])('an unknown property named with 200 000 %s', (_label, name) => {
+    const unknown = (path: string) => ({
+      path,
+      message: `property ${name} should not exist`,
+    });
+    const timed = (run: () => ReturnType<typeof single>) => {
+      const start = performance.now();
+      const errors = errorsOf(run());
+      return { errors, elapsed: performance.now() - start };
+    };
+
+    it('at the top level → its one error, quickly', () => {
+      const { errors, elapsed } = timed(() =>
+        single({ ...benchPress(), [name]: 1 }),
+      );
+      expect(errors).toEqual([unknown(name)]);
+      expect(elapsed).toBeLessThan(LONG_NAME_BUDGET_MS);
+    });
+
+    it('inside an entry of a bulk body → its one error, quickly', () => {
+      const { errors, elapsed } = timed(() =>
+        bulk({ entries: [{ ...benchPress(), [name]: 1 }] }),
+      );
+      expect(errors).toEqual([unknown(`entries[0].${name}`)]);
+      expect(elapsed).toBeLessThan(LONG_NAME_BUDGET_MS);
+    });
+
+    it('inside a set → its one error, quickly', () => {
+      const { errors, elapsed } = timed(() => single(oneSet({ [name]: 1 })));
+      expect(errors).toEqual([unknown(`sets[0].${name}`)]);
+      expect(elapsed).toBeLessThan(LONG_NAME_BUDGET_MS);
+    });
+  });
+
+  it.each([
+    ['3 items', 3],
+    ['101 items', 101],
+  ])(
+    'an entries array of %s on the single route is an unknown property',
+    (_label, length) =>
+      expect(
+        errorsOf(
+          single({
+            ...benchPress(),
+            entries: Array.from({ length }, benchPress),
+          }),
+        ),
+      ).toEqual([
+        { path: 'entries', message: 'property entries should not exist' },
+      ]),
+  );
+
+  it.each(['05', '007', '5.', '-0', '0.50', ' 5', 'Infinity'])(
+    'a string %p that JSON would not print as a number gets the fixed example',
+    (reps) =>
+      expect(errorsOf(single(oneSet({ reps })))).toEqual([
+        {
+          path: 'sets[0].reps',
+          message: `'reps' must be a JSON number, not a string, for example 5.`,
+        },
+      ]),
+  );
 
   it('keeps weight 0.125 (a micro-plate) as the exact string', () => {
     const result = single(oneSet({ weight: 0.125 }));
