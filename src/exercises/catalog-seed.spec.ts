@@ -158,6 +158,8 @@ const validFile = () => ({
 });
 
 describe('validateSeedFile (design §10.3, step 1)', () => {
+  // The stored display name is trimmed with inner whitespace collapsed, the
+  // same form the admin routes store (§10.5).
   it('accepts a valid file and returns normalised values with keys', () =>
     expect(validateSeedFile(validFile())).toEqual({
       ok: true,
@@ -172,7 +174,7 @@ describe('validateSeedFile (design §10.3, step 1)', () => {
         ],
         exercises: [
           {
-            name: 'Bench  Press',
+            name: 'Bench Press',
             key: 'bench press',
             muscleGroups: ['chest', 'shoulders', 'triceps'],
           },
@@ -287,6 +289,57 @@ describe('validateSeedFile (design §10.3, step 1)', () => {
       'chest',
       'triceps',
     ]);
+  });
+
+  it.each([
+    ['an empty nested array', []],
+    ['a nested array holding a valid item', [validFile().exercises[1]]],
+  ])('refuses %s as an exercise item at exercises[0]', (_, item) =>
+    expect(
+      validateSeedFile({
+        muscleGroups: validFile().muscleGroups,
+        exercises: [item],
+      }),
+    ).toEqual({
+      ok: false,
+      errors: [
+        { path: 'exercises[0]', message: 'An exercise must be a JSON object.' },
+      ],
+    }),
+  );
+
+  it.each([
+    ['exercises: [1]', { muscleGroups: ['chest'], exercises: [1] }],
+    ["exercises: ['x']", { muscleGroups: ['chest'], exercises: ['x'] }],
+    ['exercises: [null]', { muscleGroups: ['chest'], exercises: [null] }],
+    ['exercises: [true]', { muscleGroups: ['chest'], exercises: [true] }],
+    ['muscleGroups: [[]]', { muscleGroups: [[]], exercises: [] }],
+    ['muscleGroups: [{}]', { muscleGroups: [{}], exercises: [] }],
+  ])('returns a refusal for %s and never throws', (_, json) => {
+    let result: unknown;
+    expect(() => {
+      result = validateSeedFile(json);
+    }).not.toThrow();
+    expect(result).toMatchObject({ ok: false });
+  });
+
+  it('refuses a key property on an item, naming it (the key is computed)', () => {
+    const f = validFile();
+    const exercises = [
+      ...f.exercises,
+      { name: 'Squat', key: 'back squat', muscleGroups: ['glutes'] },
+    ];
+    const result = validateSeedFile({ ...f, exercises });
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.errors.map((e) => e.path)).toEqual([
+      'exercises[2].key',
+    ]);
+  });
+
+  it('refuses an unknown top-level property, naming it', () => {
+    const result = validateSeedFile({ ...validFile(), notes: 'draft' });
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.errors.map((e) => e.path)).toEqual(['notes']);
   });
 });
 

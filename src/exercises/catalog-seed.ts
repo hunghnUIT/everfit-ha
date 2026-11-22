@@ -19,6 +19,7 @@ import {
   muscleGroups,
 } from '../database/schema';
 import { SeedFileDto } from './dto/seed-file.dto';
+import { collapseWhitespace } from './exercise-key';
 import { checkExerciseName, checkMuscleGroupName } from './name-rules';
 
 // The catalog seed (design §10.3): each item of the file is given to a
@@ -78,8 +79,39 @@ export function validateSeedFile(json: unknown): Check<SeedFile> {
       ],
     };
   }
+  // class-validator walks into a nested array (`exercises: [[…]]`) instead
+  // of refusing it, so every item must be a plain object first.
+  const rawItems: unknown = get(json, 'exercises');
+  const itemErrors: FieldError[] = Array.isArray(rawItems)
+    ? rawItems.flatMap((item: unknown, i) =>
+        isPlainObject(item)
+          ? []
+          : [
+              {
+                path: `exercises[${i}]`,
+                message: 'An exercise must be a JSON object.',
+              },
+            ],
+      )
+    : [];
+  const refused = itemErrors.map((e) => e.path);
   const dto = plainToInstance(SeedFileDto, json);
-  const shapeErrors = toFieldErrors(validateSync(dto));
+  // A property the DTO does not declare, such as a hand-written `key`, is
+  // named rather than ignored.
+  const shapeErrors = [
+    ...itemErrors,
+    ...toFieldErrors(
+      validateSync(dto, { whitelist: true, forbidNonWhitelisted: true }),
+    ).filter(
+      (e) =>
+        !refused.some(
+          (path) =>
+            e.path === path ||
+            e.path.startsWith(`${path}.`) ||
+            e.path.startsWith(`${path}[`),
+        ),
+    ),
+  ];
   if (shapeErrors.length > 0) return { ok: false, errors: shapeErrors };
 
   const errors: FieldError[] = [];
@@ -140,7 +172,15 @@ export function validateSeedFile(json: unknown): Check<SeedFile> {
         message: `An exercise has at most ${MAX_GROUPS_PER_EXERCISE} muscle groups; this one has ${unique.length}.`,
       });
     }
-    if (name.ok) items.push({ ...name.value, muscleGroups: unique });
+    // The display spelling is stored trimmed with inner whitespace collapsed,
+    // as the admin routes store it (§10.5).
+    if (name.ok) {
+      items.push({
+        name: collapseWhitespace(name.value.name),
+        key: name.value.key,
+        muscleGroups: unique,
+      });
+    }
   });
 
   if (errors.length > 0) return { ok: false, errors };
