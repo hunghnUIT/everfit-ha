@@ -37,13 +37,18 @@ describe('toApiProblem', () => {
     expect(toApiProblem(problem)).toBe(problem);
   });
 
-  it.each(['ECONNREFUSED', '08006', '57P01'])(
-    'a pg failure with code %s → 503 SERVICE_UNAVAILABLE',
-    (code) =>
-      expect(toApiProblem(pgError(code))).toMatchObject({
-        status: 503,
-        code: 'SERVICE_UNAVAILABLE',
-      }),
+  it.each([
+    'ECONNREFUSED',
+    'ENOTFOUND',
+    'EAI_AGAIN',
+    '08006',
+    '57P01',
+    '57P03',
+  ])('a pg failure with code %s → 503 SERVICE_UNAVAILABLE', (code) =>
+    expect(toApiProblem(pgError(code))).toMatchObject({
+      status: 503,
+      code: 'SERVICE_UNAVAILABLE',
+    }),
   );
 
   it('the same failure wrapped as Drizzle wraps it, with the pg error as cause → 503', () =>

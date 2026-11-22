@@ -54,10 +54,20 @@ const DETAILS: Record<ProblemCode, string> = {
 const problemOf = (status: number, code: ProblemCode) =>
   new ApiProblem(status, code, DETAILS[code]);
 
-// ECONNREFUSED, SQLSTATE class 08 (connection exception), 57P01 (admin shutdown).
+// The driver codes that mean the database cannot be reached: refused, a host
+// that does not resolve (now or for the moment), the server shutting down
+// (57P01) or still starting (57P03). SQLSTATE class 08 is matched apart.
+const UNREACHABLE_DATABASE_CODES: ReadonlySet<string> = new Set([
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  '57P01',
+  '57P03',
+]);
+
 const isConnectionFailure = (code: string | undefined) =>
   code !== undefined &&
-  (code === 'ECONNREFUSED' || code === '57P01' || /^08[0-9A-Z]{3}$/.test(code));
+  (UNREACHABLE_DATABASE_CODES.has(code) || /^08[0-9A-Z]{3}$/.test(code));
 
 function fromHttpException(exception: HttpException): ApiProblem {
   const code = CODE_FOR_STATUS[exception.getStatus()];
