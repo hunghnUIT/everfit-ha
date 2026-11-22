@@ -103,6 +103,24 @@ describe('checkMuscleGroupName (design §10.1)', () => {
     });
   });
 
+  it('refuses "!chest" (the pattern is anchored) and accepts the Vietnamese "Ngực" as "ngực"', () => {
+    expect(checkMuscleGroupName('!chest', 'name')).toEqual({
+      ok: false,
+      errors: [
+        {
+          path: 'name',
+          message:
+            'The muscle group name may contain only letters, digits, spaces and hyphens.',
+        },
+      ],
+    });
+    // ự is U+1EF1, precomposed
+    expect(checkMuscleGroupName('Ng\u{1EF1}c', 'name')).toEqual({
+      ok: true,
+      value: 'ng\u{1EF1}c',
+    });
+  });
+
   it('accepts 40 characters and refuses 41, measured after normalising', () => {
     expect(checkMuscleGroupName(` ${'B'.repeat(40)} `, 'name')).toEqual({
       ok: true,

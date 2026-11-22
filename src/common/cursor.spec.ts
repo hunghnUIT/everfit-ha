@@ -1,7 +1,7 @@
 import { decodeCursor, encodeCursor } from './cursor';
 
 const ID = '01950000-0000-7000-8000-000000000001';
-const AT = new Date('2025-02-10T09:00:00.000Z');
+const AT = new Date('2025-02-10T09:00:00.123Z');
 
 const b64 = (text: string) => Buffer.from(text).toString('base64url');
 

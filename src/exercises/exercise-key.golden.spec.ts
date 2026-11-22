@@ -32,6 +32,12 @@ describe('exerciseKey golden pairs', () => {
     ['\u{FF32}\u{FF4F}\u{FF57}\u{FF12}', 'row2'],
     // NFKC: "Cable Fly Ⅱ", the Roman numeral Ⅱ (U+2161) becomes "II", then "ii"
     ['Cable Fly \u{2161}', 'cable fly ii'],
+    // NFKC before lower-casing: "Row №2", № (U+2116) becomes "No", then "no";
+    // lower-casing first would leave a capital N
+    ['Row \u{2116}2', 'row no2'],
+    // NFKC before trimming: "´Squat", ´ (U+00B4) becomes a space + U+0301, and
+    // that space is trimmed; trimming first would keep it
+    ['\u{00B4}Squat', '\u{0301}squat'],
     // NFKC: half-width katakana "ｽｸﾜｯﾄ" become full-width "スクワット"
     [
       '\u{FF7D}\u{FF78}\u{FF9C}\u{FF6F}\u{FF84}',
