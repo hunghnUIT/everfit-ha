@@ -109,6 +109,20 @@ describe('errors', () => {
     ]);
   });
 
+  it('a validation error carries no part of the validated object (its target)', async () => {
+    // The global pipe keeps each error's target for toFieldErrors; only the
+    // path and message of an error may leave.
+    const res = await http()
+      .post('/v1/probe')
+      .send({ n: 'x', note: 'target-marker' })
+      .expect(400);
+    expect(res.body.errors).toEqual([
+      { path: 'n', message: expect.any(String) },
+    ]);
+    expect(res.text).not.toContain('target-marker');
+    expect(JSON.stringify(logs)).not.toContain('target-marker');
+  });
+
   it('an unknown body property → 400 VALIDATION_ERROR naming it', async () => {
     const res = await http()
       .post('/v1/probe')

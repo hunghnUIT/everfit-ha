@@ -14,6 +14,9 @@ export function unsupportedUnitMessage(
 
 // A unit code or alias known to the shared UnitRegistry, case-insensitive
 // (design §6). resolve() answers null for a non-string, so any value is safe.
+// class-validator evaluates its decorators outside Nest's container, so this
+// reads SHARED_UNIT_REGISTRY itself: overriding UNIT_REGISTRY in a test
+// changes what services inject, not what this decorator accepts.
 export function IsSupportedUnit(
   validationOptions?: ValidationOptions,
 ): PropertyDecorator {
