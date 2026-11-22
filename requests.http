@@ -1,0 +1,218 @@
+### Workout Logging API: every call the README shows.
+###
+### Open this file in VS Code (REST Client extension) or an editor with an
+### .http runner, with `docker compose up` running. Send each request with
+### its "Send Request" link. Three requests read a value from an earlier one
+### (`{{logOne.response.body.data.id}}` and the cursor of `firstPage`), so
+### send those first; the `{{name.response.body…}}` form is the REST Client
+### extension's. Every date below is a full date-time with an offset, as
+### the API requires.
+
+@host = http://localhost:3000
+@user = u_123
+
+### ---------------------------------------------------------------------
+### Health and docs (unversioned)
+### ---------------------------------------------------------------------
+
+### Liveness: the process is up
+GET {{host}}/health/live
+
+### Readiness: the database answers
+GET {{host}}/health/ready
+
+### The OpenAPI document (the Swagger UI is at {{host}}/docs)
+GET {{host}}/docs-json
+
+### ---------------------------------------------------------------------
+### Reference data
+### ---------------------------------------------------------------------
+
+### Supported units and their aliases
+GET {{host}}/v1/units
+
+### The known muscle groups, each with the number of exercises that list it
+GET {{host}}/v1/muscle-groups
+
+### The catalog: every exercise with its muscle groups
+GET {{host}}/v1/exercises
+
+### One catalog exercise (the key is the normalised name)
+GET {{host}}/v1/exercises/bench%20press
+
+### ---------------------------------------------------------------------
+### Log entries
+### ---------------------------------------------------------------------
+
+### Log one entry. 225 lb and 105 kg in one entry; 05:30 in Vietnam (+07:00).
+### The response has the instant in UTC, the offset for display, kilograms and
+### each set's original. The Location header points at the entry.
+# @name logOne
+POST {{host}}/v1/users/{{user}}/workout-entries
+Content-Type: application/json
+
+{
+  "date": "2025-02-10T05:30:00+07:00",
+  "exerciseName": "Bench Press",
+  "sets": [
+    { "reps": 5, "weight": 225, "unit": "lbs" },
+    { "reps": 3, "weight": 105, "unit": "kg" }
+  ]
+}
+
+### A client that sends UTC gets utcOffset null
+POST {{host}}/v1/users/{{user}}/workout-entries
+Content-Type: application/json
+
+{
+  "date": "2025-02-12T12:30:00Z",
+  "exerciseName": "Bench Press",
+  "sets": [
+    { "reps": 10, "weight": 100, "unit": "kg" },
+    { "reps": 2, "weight": 120, "unit": "kg" }
+  ]
+}
+
+### Log several entries at once, atomically (1 to 100). The response lists them
+### in the order sent; history lists them newest first.
+POST {{host}}/v1/users/{{user}}/workout-entries/bulk
+Content-Type: application/json
+
+{
+  "entries": [
+    {
+      "date": "2025-02-14T12:00:00+07:00",
+      "exerciseName": "Back Squat",
+      "sets": [
+        { "reps": 5, "weight": 140, "unit": "kg" },
+        { "reps": 5, "weight": 150, "unit": "kg" }
+      ]
+    },
+    {
+      "date": "2025-02-14T12:00:00+07:00",
+      "exerciseName": "Pull-Up",
+      "sets": [
+        { "reps": 10, "weight": 0, "unit": "kg" }
+      ]
+    }
+  ]
+}
+
+### One entry by id, here in pounds
+GET {{host}}/v1/users/{{user}}/workout-entries/{{logOne.response.body.data.id}}?unit=lb
+
+### ---------------------------------------------------------------------
+### Mistakes the API explains (each is a 4xx with problem details)
+### ---------------------------------------------------------------------
+
+### A date alone is a 400 that shows the fix (400)
+POST {{host}}/v1/users/{{user}}/workout-entries
+Content-Type: application/json
+
+{
+  "date": "2025-02-10",
+  "exerciseName": "Bench Press",
+  "sets": [ { "reps": 5, "weight": 100, "unit": "kg" } ]
+}
+
+### An unsupported unit and a date-time with no offset: both errors at once (400)
+POST {{host}}/v1/users/{{user}}/workout-entries
+Content-Type: application/json
+
+{
+  "date": "2025-02-10T06:30:00",
+  "exerciseName": "Bench Press",
+  "sets": [ { "reps": 5, "weight": 100, "unit": "stone" } ]
+}
+
+### A body that is not JSON (what `curl -d` sends with no -H) is a 415
+POST {{host}}/v1/users/{{user}}/workout-entries
+Content-Type: application/x-www-form-urlencoded
+
+date=2025-02-10T05:30:00%2B07:00&exerciseName=Bench%20Press
+
+### A query parameter the route does not accept is a 400 that lists the accepted ones
+GET {{host}}/v1/users/{{user}}/workout-entries?exerciseName=bench
+
+### ---------------------------------------------------------------------
+### History
+### ---------------------------------------------------------------------
+
+### Newest first, a page of 2. Send it, then use the cursor in the next request.
+# @name firstPage
+GET {{host}}/v1/users/{{user}}/workout-entries?limit=2
+
+### The next page: send the cursor unchanged
+GET {{host}}/v1/users/{{user}}/workout-entries?limit=2&cursor={{firstPage.response.body.page.nextCursor}}
+
+### Filters: part of the name, a muscle group, a range (half-open: from is
+### included, to is excluded), weights shown in pounds. This range is February
+### for a viewer in Hanoi.
+GET {{host}}/v1/users/{{user}}/workout-entries?exercise=bench&muscleGroup=chest&from=2025-01-31T17:00:00Z&to=2025-02-28T17:00:00Z&unit=lb&limit=20
+
+### No match is a 200 with an empty list and a message, not an error
+GET {{host}}/v1/users/{{user}}/workout-entries?exercise=nothing-like-this
+
+### ---------------------------------------------------------------------
+### Personal records
+### ---------------------------------------------------------------------
+
+### Records for one exercise, all time. exercise is the whole name.
+GET {{host}}/v1/users/{{user}}/personal-records?exercise=Bench%20Press
+
+### The same in a range, in pounds
+GET {{host}}/v1/users/{{user}}/personal-records?exercise=Bench%20Press&from=2025-02-01T00:00:00Z&to=2025-03-01T00:00:00Z&unit=lb
+
+### Part of a name finds nothing here: a 200 with null records and a hint
+GET {{host}}/v1/users/{{user}}/personal-records?exercise=bench
+
+### This period against the one before it, with the change in each record.
+### All four bounds are required; to is excluded, and this period's start is
+### the other's end.
+GET {{host}}/v1/users/{{user}}/personal-records/compare?exercise=Bench%20Press&from=2025-02-01T00:00:00Z&to=2025-03-01T00:00:00Z&compareFrom=2025-01-01T00:00:00Z&compareTo=2025-02-01T00:00:00Z&unit=kg
+
+### A missing bound is one 400 that lists every missing parameter
+GET {{host}}/v1/users/{{user}}/personal-records/compare?exercise=Bench%20Press&from=2025-02-01T00:00:00Z
+
+### ---------------------------------------------------------------------
+### Catalog administration: THESE FIVE CALLS ARE OPEN.
+### In the version as delivered they are unauthenticated: anyone who can
+### reach the API can change the catalog. See the README, "Catalog
+### administration", for the two lines that switch the token guard on. When
+### it is on, add this header to each call:
+###   Authorization: Bearer <the value of ADMIN_API_TOKEN>
+### ---------------------------------------------------------------------
+
+### Add an exercise (201 with Location; 409 if its key exists)
+POST {{host}}/v1/admin/exercises
+Content-Type: application/json
+
+{ "name": "Zercher Squat", "muscleGroups": ["quads", "glutes", "back"] }
+
+### A key can contain a slash: Location is /v1/exercises/90%2F90%20hip%20stretch
+POST {{host}}/v1/admin/exercises
+Content-Type: application/json
+
+{ "name": "90/90 Hip Stretch", "muscleGroups": ["glutes"] }
+
+### Follow that Location
+GET {{host}}/v1/exercises/90%2F90%20hip%20stretch
+
+### Replace the muscle groups of an exercise (a full replacement; the name may
+### change its spelling but not its key)
+PUT {{host}}/v1/admin/exercises/zercher%20squat
+Content-Type: application/json
+
+{ "name": "Zercher Squat", "muscleGroups": ["quads", "glutes", "back", "abs"] }
+
+### Remove an exercise from the catalog (204). Logged entries are not touched.
+DELETE {{host}}/v1/admin/exercises/90%2F90%20hip%20stretch
+
+### Add a muscle group to the closed list (201; 409 if it exists)
+POST {{host}}/v1/admin/muscle-groups
+Content-Type: application/json
+
+{ "name": "neck" }
+
+### Remove a muscle group that no exercise lists (204; 409 while one does)
+DELETE {{host}}/v1/admin/muscle-groups/neck
