@@ -23,8 +23,10 @@ type ExerciseBody = {
 const catalogOf = (app: INestApplication) =>
   app.get<ExerciseCatalog>(EXERCISE_CATALOG);
 
-// A group, then an exercise with its links in position order, by plain SQL:
-// what a hand-typed change or another replica's write looks like here.
+// A group, then an exercise and its links, by plain SQL: what a hand-typed
+// change or another replica's write looks like here. `groups` is in position
+// order; the links are inserted last position first, so a read that forgets
+// ORDER BY position, or sorts by name, shows them in the wrong order.
 async function insertBySql(
   group: string,
   name: string,
@@ -36,7 +38,7 @@ async function insertBySql(
     key,
     name,
   ]);
-  for (const [position, muscleGroup] of groups.entries()) {
+  for (const [position, muscleGroup] of [...groups.entries()].toReversed()) {
     await query(
       `INSERT INTO exercise_muscle_groups (exercise_key, muscle_group, position)
        VALUES ($1, $2, $3)`,
@@ -54,6 +56,12 @@ describe('catalog read routes', () => {
   });
 
   it('GET /v1/exercises lists bench press with chest, shoulders, triceps in that order, with createdAt and updatedAt, ordered by key', async () => {
+    // Two different instants, so neither field can be printed from the other.
+    await query(
+      `UPDATE exercises SET created_at = $1, updated_at = $2
+        WHERE exercise_key = 'bench press'`,
+      ['2025-01-15T09:00:00.125+07:00', '2025-03-01T08:30:00.250Z'],
+    );
     const res = await http().get('/v1/exercises').expect(200);
     const data = res.body.data as ExerciseBody[];
 
@@ -64,17 +72,22 @@ describe('catalog read routes', () => {
     const keys = data.map((exercise) => exercise.key);
     expect(keys).toEqual(keys.toSorted());
 
-    const [stored] = await query<{ created_at: Date; updated_at: Date }>(
-      `SELECT created_at, updated_at FROM exercises
-        WHERE exercise_key = 'bench press'`,
-    );
     expect(data.find((exercise) => exercise.key === 'bench press')).toEqual({
       key: 'bench press',
       name: 'Bench Press',
       muscleGroups: ['chest', 'shoulders', 'triceps'],
-      createdAt: stored.created_at.toISOString(),
-      updatedAt: stored.updated_at.toISOString(),
+      createdAt: '2025-01-15T02:00:00.125Z',
+      updatedAt: '2025-03-01T08:30:00.250Z',
     });
+    // A seeded exercise whose groups are not in alphabetical order.
+    expect(data.find((exercise) => exercise.key === 'squat')).toMatchObject({
+      muscleGroups: ['quads', 'glutes', 'hamstrings'],
+    });
+    expect(catalogOf(app).snapshot().muscleGroupsFor('squat')).toEqual([
+      'quads',
+      'glutes',
+      'hamstrings',
+    ]);
     for (const exercise of data) {
       expect(exercise.createdAt).toMatch(ISO_MS);
       expect(exercise.updatedAt).toMatch(ISO_MS);
@@ -140,7 +153,7 @@ describe('catalog read routes', () => {
   });
 
   it('an exercise and a group inserted by SQL appear on both list routes without a refresh()', async () => {
-    await insertBySql('neck', 'Neck Curl', 'neck curl', ['neck', 'traps']);
+    await insertBySql('neck', 'Neck Curl', 'neck curl', ['traps', 'neck']);
     await query('INSERT INTO muscle_groups (name) VALUES ($1)', ['adductors']);
 
     const exercises = await http().get('/v1/exercises').expect(200);
@@ -148,8 +161,9 @@ describe('catalog read routes', () => {
       (exercises.body.data as ExerciseBody[]).find(
         (exercise) => exercise.key === 'neck curl',
       ),
-    ).toMatchObject({ name: 'Neck Curl', muscleGroups: ['neck', 'traps'] });
-    await http().get('/v1/exercises/Neck%20Curl').expect(200);
+    ).toMatchObject({ name: 'Neck Curl', muscleGroups: ['traps', 'neck'] });
+    const one = await http().get('/v1/exercises/Neck%20Curl').expect(200);
+    expect(one.body.data.muscleGroups).toEqual(['traps', 'neck']);
 
     const groups = await http().get('/v1/muscle-groups').expect(200);
     expect(groups.body.data).toEqual(
@@ -163,6 +177,12 @@ describe('catalog read routes', () => {
     const snapshot = catalogOf(app).snapshot();
     expect(snapshot.hasMuscleGroup('neck')).toBe(false);
     expect(snapshot.muscleGroupsFor('neck curl')).toEqual([]);
+
+    await catalogOf(app).refresh();
+    expect(catalogOf(app).snapshot().muscleGroupsFor('neck curl')).toEqual([
+      'traps',
+      'neck',
+    ]);
   });
 
   it('init resolves only after the first load (U-19)', async () => {
@@ -205,8 +225,12 @@ describe('catalog read routes', () => {
       'rotator cuff',
       'Band External Rotation',
       'band external rotation',
-      ['rotator cuff', 'shoulders'],
+      ['shoulders', 'rotator cuff'],
     );
+    // A group no exercise uses is still a known group.
+    await query('INSERT INTO muscle_groups (name) VALUES ($1)', [
+      'hip flexors',
+    ]);
     expect(second.snapshot().hasMuscleGroup('rotator cuff')).toBe(false);
 
     await second.refresh();
@@ -216,8 +240,10 @@ describe('catalog read routes', () => {
       'band external rotation',
     ]);
     expect(second.snapshot().muscleGroupsFor('band external rotation')).toEqual(
-      ['rotator cuff', 'shoulders'],
+      ['shoulders', 'rotator cuff'],
     );
+    expect(second.snapshot().hasMuscleGroup('hip flexors')).toBe(true);
+    expect(second.snapshot().keysForMuscleGroup('hip flexors')).toEqual([]);
     expect(second.snapshot().muscleGroupsFor('bench press')).toEqual([
       'chest',
       'shoulders',
