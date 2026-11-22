@@ -88,4 +88,38 @@ describe('database', () => {
     ]);
     expect(JSON.stringify(warnings)).not.toContain(new URL(url).host);
   });
+
+  it('a connection in use that fails logs one warn line with the code and name only, and does not throw', async () => {
+    // pg-pool removes its own error listener when it hands a client out, so
+    // without one of the app's, a lost connection mid-query is an unhandled
+    // 'error' event that ends the process.
+    const warnings: unknown[][] = [];
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(function (
+      this: Logger,
+      ...args: unknown[]
+    ) {
+      if (get(this, 'context') === 'Database') warnings.push(args);
+    });
+    const pool = app.get<Pool>(PG_POOL);
+    const url = process.env.DATABASE_URL ?? '';
+    const error = Object.assign(
+      new Error(`Connection terminated unexpectedly ${url}`),
+      { code: '57P01' },
+    );
+    const client = await pool.connect();
+    try {
+      expect(client.listenerCount('error')).toBeGreaterThan(0);
+      expect(() => client.emit('error', error)).not.toThrow();
+    } finally {
+      client.release(true);
+    }
+
+    expect(warnings).toEqual([
+      [
+        { code: '57P01', name: 'Error' },
+        'Database connection failed while in use',
+      ],
+    ]);
+    expect(JSON.stringify(warnings)).not.toContain(new URL(url).host);
+  });
 });

@@ -8,7 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { driverErrorCode } from '../common/problem';
+import { driverErrorCode, errorName } from '../common/problem';
 import { ApiEnv } from '../config/env';
 import * as schema from './schema';
 import { DB, PG_POOL } from './tokens';
@@ -27,6 +27,18 @@ function createPool(config: ConfigService<ApiEnv, true>): Pool {
     logger.warn(
       { code: driverErrorCode(error) },
       'Idle database connection failed',
+    ),
+  );
+  // pg-pool removes its own error listener from a client it hands out, so a
+  // connection lost mid-query (a restart, pg_terminate_backend) would be an
+  // unhandled 'error' event and end the process. Every client gets this one:
+  // the query that was running rejects, and the request answers a problem.
+  pool.on('connect', (client) =>
+    client.on('error', (error) =>
+      logger.warn(
+        { code: driverErrorCode(error), name: errorName(error) },
+        'Database connection failed while in use',
+      ),
     ),
   );
   return pool;
