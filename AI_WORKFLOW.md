@@ -142,6 +142,20 @@ Implementation (the log's entries, with the commit):
 16. **A health check that could pass too early (Task 4, `358adb8`).** `pg_isready` with no host asks over the unix socket, where the image's
     temporary first-boot server also answers. The reviewer found it by reading the image's entrypoint; a side-by-side probe showed the socket
     answering while TCP was refused. The check now asks over TCP.
+17. **A report that described what it had not measured (Task 16, `94d65db`).** The benchmark runner's first report (Claude Sonnet) printed "heap
+    fetches: n/a" with no reason and counted raw buffer lines as temporary files; the implementer caught both reading the generated report. Its reviewer
+    then found the spill summary quoting a cumulative node figure (1 760 blocks) where the spill itself was 880; the README quotes 880.
+18. **Documents that went beyond their sources (Task 18, `dce84ce`).** The README draft explained a heap-fetch figure with a guess, replaced by the
+    plan's own figures before the commit. The reviewer (Claude Sonnet) then checked the README against the code and `bench/report.md` and found a figure
+    quoted from the wrong plan (39 heap fetches where the first-page plan shows 21), two `[V]` tags the research notes do not support, and a sentence
+    overstating what `/docs` declares; all were deferred to the final review and corrected in its fix round (`a41bba7`).
+19. **What the final review of the whole branch found (Claude Fable, extra effort).** It ran the built image and every request in `requests.http`.
+    Unknown routes outside `/v1` (`GET /`, `/favicon.ico`) answered Express's HTML 404, because Nest mounts its not-found handler under a global
+    prefix only; each controller now names `/v1` itself (`8645cd4`). The README credited `ix_entries_exercise` with the PR join while every PR plan in
+    the committed benchmark scanned `ix_entries_history` with a filter; the text now says what the plans show (`a41bba7`). The 500 log line of a failed
+    statement carried every bound value, so a failed bulk wrote the request body into the log; it now logs the statement text and code only (`f091882`).
+    This file had said the owner checked at nine stops, when the run stopped for the owner at two of them; section 5 now says what happened. The review also found
+    events missing from the log, which the controller added (`9c31307`).
 
 ## 4. Suggestions rejected, and why
 
@@ -169,7 +183,10 @@ Implementation (the log's entries, with the commit):
    Windows `cmd` (a grader on native Windows is uncommon, CI and Docker cover it, `cross-env` would be an unnamed dependency; Task 1); `strictPropertyInitialization:
    false` (the Nest template's setting, which DTO classes need; Task 1); the pool closing before the HTTP server so a request in flight at shutdown could get a
    500 (only a request in the milliseconds of a shutdown; Task 3); two inputs that pass validation but fail in the database, a cursor far below PostgreSQL's range
-   and a name with U+0000 (only a fuzzer sends either; Task 7); a body nested 1 200 levels (only a hostile client; Task 10a).
+   and a name with U+0000 (only a fuzzer sends either; Task 7); a body nested 1 200 levels (only a hostile client; Task 10a). The Task 7 rejection did not
+   last: the final review found the same two inputs still answering 500 on more routes, with a year past 9999 in a read bound and a blank search term
+   beside them, and since each is one keystroke and a 500 is the worst answer the API can give, they became a 400 (a 404 on a catalog path) in its fix
+   round (`d072a6e`). The nested body stays rejected.
 9. **The owner's own corrections of AI process.** Waiting for the owner on every pull request kept stopping the run, so the owner changed the rule (work ahead; Task
    2); the second review was dropped after both routes to it ran out of quota (Task 4); the owner asked for `import get from 'lodash/get'` after reading a pull
    request that imported the whole library, and the controller then made lint refuse the bare import so the rule does not rest on memory (Task 2, `3037ec6`, `44dd074`).
@@ -184,8 +201,23 @@ Implementation (the log's entries, with the commit):
   that crash the built app, a number in a report that does not match the code.
 - **The controller rules on each finding with the real-use test** (who sends this input, how often) and records each ruling; deferred and rejected findings are in
   the log with their reasons.
-- **The owner checks at set stops** (after Tasks 0, 4, 7, 9, 11, 13, 16, 17b, 18) and corrected the process more than once (sections 2 and 4.9). The first commit carried a
-  placeholder author address from the machine's git settings; the controller noticed before the first push and the owner chose a different address (Task 0).
+- **What the owner reviewed.** The owner reviewed the first three pull requests on GitHub: approved the first and the third, and requested a change on the
+  second (the lodash import, section 4.9). At the Task 4 checkpoint the owner told the controller to merge on an approving AI review and green CI, with no
+  review by the owner until the owner said otherwise; the controller read that as lifting the wait at the later checkpoints too, so those after Tasks 7, 9,
+  11 and 13 were reported to the owner and the run went on. Throughout, the owner answered the decisions put to them (fixed dates in the migration journal,
+  which concurrency the benchmark budgets bind, the `withCatalogWrite` signature, which model does what) and, after Task 4, did not read every diff. During
+  Task 14's pull request the owner went to sleep and said no confirmation was needed: Tasks 15 to 18, the final review and its fix round ran overnight,
+  every decision a controller ruling that keeps the design as written, recorded for the owner. So 17 of the 20 task pull requests had an AI review and no
+  human one. The owner corrected the process more than once (sections 2 and 4.9). The first commit carried a placeholder author address from the machine's
+  git settings; the controller noticed before the first push and the owner chose a different address (Task 0).
+- **`CLAUDE.md` is the rules file as written before the build.** It was not rewritten during the run, and the owner changed these rules as it went, each
+  change in the log under its task: the repository is public, not private (Task 0); the run did not wait for an approved pull request before the next
+  independent task started (Task 2); the second reviewer ran on the first two pull requests and was dropped when both routes to it ran out of quota, so the
+  final review also had one reviewer, not two (Tasks 3 and 4); from Task 4 one AI review and green CI merged a pull request, and checkpoints reported instead
+  of stopping (Task 4); the table names Fable as controller, Opus as implementer and Fable as first reviewer, while in practice Sonnet took over normal tasks
+  as implementer, the first review moved from Fable to Opus and then to Sonnet or Opus by task, and the controller ran on Opus after a context compaction
+  (Tasks 9, 10a, 10b and 12, section 1); and five pull requests were merged through the GitHub API, not `gh pr merge`, so the working tree an implementer
+  was writing in was not touched (Task 15).
 - **A fact is "verified" only if the author checked a primary source or ran it.** A research pass reported that subagents can invoke plugin skills through the Skill tool;
   that is true in general and false for the plugin in question (57 of its 58 skills are not invocable by the model), caught by reading the plugin at a fixed commit instead of its
   README (W-49). A reviewer's claim that `INCLUDE` on a primary key was checked was re-read in the `CREATE TABLE` page before being tagged `[V]` (W-25).
