@@ -16,6 +16,7 @@ import { UserIdPipe } from '../common/user-id.pipe';
 import { SHARED_UNIT_REGISTRY } from '../units/unit-registry';
 import { BulkInputDto, EntryInputDto } from './dto/entry-input.dto';
 import { EntryQueryDto } from './dto/entry-query.dto';
+import { HistoryQueryDto } from './dto/history-query.dto';
 import { entryNotFound, WorkoutsService } from './workouts.service';
 
 // HTTP only (design §9.1). The body is taken as unknown, so the global
@@ -51,6 +52,19 @@ export class WorkoutsController {
     @Body() body: unknown,
   ) {
     return { data: await this.service.logBulk(userId, body) };
+  }
+
+  // Newest first: performed_at, then id, both descending (§8). The global
+  // ValidationPipe checks the query against HistoryQueryDto first.
+  @Get()
+  @ApiOperation({
+    summary: 'History: entries newest first, filtered, a page at a time',
+  })
+  async findHistory(
+    @Param('userId', UserIdPipe) userId: string,
+    @Query() query: HistoryQueryDto,
+  ) {
+    return this.service.listHistory(userId, query);
   }
 
   @Get(':id')

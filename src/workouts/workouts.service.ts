@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock } from '../common/clock';
+import { encodeCursor } from '../common/cursor';
 import { ApiProblem, validationProblem } from '../common/problem';
 import { DB, type Database } from '../database/tokens';
 import {
@@ -8,8 +9,10 @@ import {
 } from '../exercises/exercise-catalog';
 import { UNIT_REGISTRY, UnitRegistry } from '../units/unit-registry';
 import { UnitCode } from '../units/weight-units';
+import { HistoryQueryDto } from './dto/history-query.dto';
 import { readEntryInputs } from './entry-input';
 import { EntryResponse, toEntryResponse } from './entry-response';
+import { readHistoryQuery } from './history-query';
 import { WorkoutsRepository } from './workouts.repository';
 
 // The one 404 for an entry: an id that is not a UUID gets it too (the
@@ -21,6 +24,15 @@ export function entryNotFound(): ApiProblem {
     'This user has no workout entry with that id.',
   );
 }
+
+export const NO_HISTORY_MESSAGE =
+  'No workout entries found for the given filters.';
+
+export type HistoryPage = {
+  data: EntryResponse[];
+  page: { limit: number; hasMore: boolean; nextCursor: string | null };
+  message?: string;
+};
 
 // Orchestration only. Each request reads the clock once and takes one catalog
 // snapshot, which every lookup of its response uses (design §8, §10.2).
@@ -93,5 +105,34 @@ export class WorkoutsService {
       throw entryNotFound();
     }
     return toEntryResponse(stored, code, snapshot, this.units);
+  }
+
+  // Design §9.2. One snapshot serves the muscle-group check, its key list and
+  // every entry's groups (§10.2). The cursor is built from the last stored
+  // row returned, never the look-ahead row or the formatted response.
+  async listHistory(
+    userId: string,
+    query: HistoryQueryDto,
+  ): Promise<HistoryPage> {
+    const snapshot = this.catalog.snapshot();
+    const checked = readHistoryQuery(query, userId, snapshot, this.units);
+    if (!checked.ok) throw validationProblem(checked.errors);
+    const q = checked.value;
+    const { entries, hasMore } = await this.repository.findHistoryPage(q);
+    const last = entries.at(-1);
+    const page = {
+      limit: q.limit,
+      hasMore,
+      nextCursor:
+        hasMore && last !== undefined
+          ? encodeCursor({ at: last.performedAt, id: last.id })
+          : null,
+    };
+    const data = entries.map((entry) =>
+      toEntryResponse(entry, q.unit, snapshot, this.units),
+    );
+    return data.length === 0
+      ? { data, page, message: NO_HISTORY_MESSAGE }
+      : { data, page };
   }
 }
