@@ -14,7 +14,17 @@ export function requireJson(
   _res: Response,
   next: NextFunction,
 ): void {
-  if (BODY_METHODS.has(req.method) && req.is('application/json') === false) {
+  // No body, so nothing of the wrong type was sent. type-is treats a zero
+  // length as a body, and Postman, supertest and Node clients send
+  // Content-Length: 0 for an empty POST.
+  const empty =
+    req.headers['content-length'] === '0' &&
+    req.headers['transfer-encoding'] === undefined;
+  if (
+    BODY_METHODS.has(req.method) &&
+    !empty &&
+    req.is('application/json') === false
+  ) {
     next(
       new ApiProblem(
         415,

@@ -235,6 +235,36 @@ describe('errors', () => {
     expect(res.body).toEqual({ n: 1 });
   });
 
+  // supertest, like Postman and Node clients, sends Content-Length: 0 for a
+  // POST with no body; type-is would count that as a body.
+  it('an empty POST with no Content-Type passes on to validation', async () => {
+    const res = await http().post('/v1/probe').expect(400);
+    expect(res.req.getHeader('content-type')).toBeUndefined();
+    expect(res.body.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('an empty POST with a form Content-Type and Content-Length: 0 passes on to validation', async () => {
+    const res = await http()
+      .post('/v1/probe')
+      .set('Content-Type', 'application/x-www-form-urlencoded')
+      .set('Content-Length', '0')
+      .expect(400);
+    expect(res.body.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('a body with no Content-Type header → 415', async () => {
+    // A Buffer is sent as it is: superagent adds no Content-Type for it.
+    const res = await http()
+      .post('/v1/probe')
+      .send(Buffer.from('{"n":1}'))
+      .expect(415);
+    expect(res.req.getHeader('content-type')).toBeUndefined();
+    expect(res.body).toMatchObject({
+      code: 'UNSUPPORTED_MEDIA_TYPE',
+      detail: 'Send Content-Type: application/json',
+    });
+  });
+
   it('a POST with the JSON header and no body passes on to validation', async () => {
     const res = await http()
       .post('/v1/probe')
