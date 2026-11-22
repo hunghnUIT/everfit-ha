@@ -34,24 +34,46 @@ export class WorkoutsService {
     private readonly repository: WorkoutsRepository,
   ) {}
 
-  // The body is validated whole by readEntryInputs; the entry is written and
-  // read back in one transaction, so the response is the entry exactly as
-  // every later read returns it, created_at included. Shown in kg (§9.1).
+  // The body is validated whole by readEntryInputs, which reports every
+  // fault of the request at once. Shown in kg (§9.1).
   async logEntry(userId: string, body: unknown): Promise<EntryResponse> {
-    const result = readEntryInputs(body, 'single', userId, {
+    const [entry] = await this.logEntries(userId, body, 'single');
+    return entry;
+  }
+
+  // 1–100 entries, all or none (design §9.1, §9.5), returned in the order sent.
+  async logBulk(userId: string, body: unknown): Promise<EntryResponse[]> {
+    return this.logEntries(userId, body, 'bulk');
+  }
+
+  // Every entry is written and read back in one transaction (two INSERTs, two
+  // SELECTs, whatever the count), so each item is the entry exactly as every
+  // later read returns it, created_at included. One snapshot formats them all.
+  private async logEntries(
+    userId: string,
+    body: unknown,
+    shape: 'single' | 'bulk',
+  ): Promise<EntryResponse[]> {
+    const result = readEntryInputs(body, shape, userId, {
       units: this.units,
       now: this.clock.now(),
     });
     if (!result.ok) throw validationProblem(result.errors);
-    const [entry] = result.value;
+    const entries = result.value;
+    const ids = entries.map((entry) => entry.id);
     const stored = await this.db.transaction(async (tx) => {
-      await this.repository.insertEntries([entry], tx);
-      return this.repository.findEntry(userId, entry.id, tx);
+      await this.repository.insertEntries(entries, tx);
+      return this.repository.findEntriesByIds(ids, tx);
     });
-    if (stored === null) {
-      throw new Error(`Entry ${entry.id} was not read back after its insert`);
+    if (stored.length !== ids.length) {
+      throw new Error(
+        `${ids.length - stored.length} of ${ids.length} entries were not read back after their insert`,
+      );
     }
-    return toEntryResponse(stored, 'kg', this.catalog.snapshot(), this.units);
+    const snapshot = this.catalog.snapshot();
+    return stored.map((entry) =>
+      toEntryResponse(entry, 'kg', snapshot, this.units),
+    );
   }
 
   // `unit` is the query's text, already checked by EntryQueryDto; kg when absent.

@@ -14,7 +14,7 @@ import { ApiBody, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { UserIdPipe } from '../common/user-id.pipe';
 import { SHARED_UNIT_REGISTRY } from '../units/unit-registry';
-import { EntryInputDto } from './dto/entry-input.dto';
+import { BulkInputDto, EntryInputDto } from './dto/entry-input.dto';
 import { EntryQueryDto } from './dto/entry-query.dto';
 import { entryNotFound, WorkoutsService } from './workouts.service';
 
@@ -38,6 +38,19 @@ export class WorkoutsController {
     const data = await this.service.logEntry(userId, body);
     res.location(`/v1/users/${userId}/workout-entries/${data.id}`);
     return { data };
+  }
+
+  // No Location: the request creates many resources and no one URL stands
+  // for them; each item carries its id (§9.1).
+  @Post('bulk')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Log 1 to 100 entries atomically' })
+  @ApiBody({ type: BulkInputDto })
+  async createBulk(
+    @Param('userId', UserIdPipe) userId: string,
+    @Body() body: unknown,
+  ) {
+    return { data: await this.service.logBulk(userId, body) };
   }
 
   @Get(':id')

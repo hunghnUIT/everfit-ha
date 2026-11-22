@@ -1,6 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
+import groupBy from 'lodash/groupBy';
 import { workoutEntries, workoutSets } from '../database/schema';
+import { pgArray } from '../database/sql';
 import { DB, type Database, type Executor } from '../database/tokens';
 import { UNIT_REGISTRY, UnitRegistry } from '../units/unit-registry';
 import { NewEntry, NewSet } from './entry-input';
@@ -13,7 +15,7 @@ export type StoredEntry = Omit<NewEntry, 'sets'> & {
 };
 
 // SQL only. Every statement is built by Drizzle and parameterised. Each method
-// runs on the database or on a transaction the caller opened (`executor`), so
+// runs on the database or on a transaction the caller opened (`db`), so
 // the service can read an entry back inside the transaction that wrote it.
 @Injectable()
 export class WorkoutsRepository {
@@ -28,9 +30,9 @@ export class WorkoutsRepository {
   // database's default. On a caller's transaction this is a savepoint.
   async insertEntries(
     entries: NewEntry[],
-    executor: Executor = this.db,
+    db: Executor = this.db,
   ): Promise<void> {
-    await executor.transaction(async (tx) => {
+    await db.transaction(async (tx) => {
       await tx.insert(workoutEntries).values(
         entries.map((e) => ({
           id: e.id,
@@ -62,18 +64,57 @@ export class WorkoutsRepository {
   async findEntry(
     userId: string,
     id: string,
-    executor: Executor = this.db,
+    db: Executor = this.db,
   ): Promise<StoredEntry | null> {
-    const [entry] = await executor
+    const [entry] = await db
       .select()
       .from(workoutEntries)
       .where(and(eq(workoutEntries.userId, userId), eq(workoutEntries.id, id)));
     if (entry === undefined) return null;
-    const sets = await executor
+    const sets = await db
       .select()
       .from(workoutSets)
       .where(eq(workoutSets.entryId, id))
       .orderBy(asc(workoutSets.setNumber));
+    return this.toStoredEntry(entry, sets);
+  }
+
+  // The entries with these ids and their sets, in the order of `ids`: one
+  // query for the entries and one for all their sets, whatever the count. An
+  // id with no row is left out, so the caller compares the lengths when it
+  // expects every id. Not filtered by user: the ids come from the caller's
+  // own insert or from a query that already filtered by user.
+  async findEntriesByIds(
+    ids: readonly string[],
+    db: Executor = this.db,
+  ): Promise<StoredEntry[]> {
+    if (ids.length === 0) return [];
+    const anyId = pgArray(ids, 'uuid');
+    const entries = await db
+      .select()
+      .from(workoutEntries)
+      .where(sql`${workoutEntries.id} = ANY(${anyId})`);
+    const sets = await db
+      .select()
+      .from(workoutSets)
+      .where(sql`${workoutSets.entryId} = ANY(${anyId})`)
+      .orderBy(asc(workoutSets.entryId), asc(workoutSets.setNumber));
+    // lodash: Map.groupBy is ES2024, past this project's lib.
+    const setsById = groupBy(sets, (set) => set.entryId);
+    const entriesById = new Map(entries.map((entry) => [entry.id, entry]));
+    return ids.flatMap((id) => {
+      const entry = entriesById.get(id);
+      return entry === undefined
+        ? []
+        : [this.toStoredEntry(entry, setsById[id] ?? [])];
+    });
+  }
+
+  // `sets` are the entry's rows in set_number order.
+  private toStoredEntry(
+    entry: typeof workoutEntries.$inferSelect,
+    sets: (typeof workoutSets.$inferSelect)[],
+  ): StoredEntry {
     return {
       id: entry.id,
       userId: entry.userId,
