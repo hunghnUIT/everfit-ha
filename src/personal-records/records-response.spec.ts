@@ -83,4 +83,40 @@ describe('toRecordsResponse (design §6, §7, §9.3)', () => {
       bestEstimatedOneRepMax: { estimatedOneRepMax: 103.46, ...fields },
     });
   });
+
+  // Read in another unit, volume comes from the exact kilograms: 512.5 kg is
+  // 1129.869… lb. From the displayed weight (225.97 lb × 5) it would be 1129.85.
+  it('102.5 kg × 5 read in lb → volume 1129.87', () => {
+    const row = rowWith({
+      reps: 5,
+      weight: '102.500',
+      unit: 'kg',
+      weightKg: '102.50000000000',
+    });
+    expect(
+      toRecordsResponse(allThree(row), 'lb', units).highestVolumeSet,
+    ).toMatchObject({ volume: 1129.87, weight: 225.97, unit: 'lb' });
+  });
+
+  // 225 lb is 102.05828325 kg: × 5 = 510.29141625; × 35 / 30 = 119.0679…
+  it('225 lb × 5 read in kg → weight 102.06, volume 510.29, e1RM 119.07', () => {
+    const row = rowWith({
+      reps: 5,
+      weight: '225.000',
+      unit: 'lb',
+      weightKg: '102.05828325000',
+    });
+    const fields = {
+      weight: 102.06,
+      reps: 5,
+      unit: 'kg',
+      original: { weight: 225, unit: 'lb' },
+      ...SHARED,
+    };
+    expect(toRecordsResponse(allThree(row), 'kg', units)).toEqual({
+      heaviestSet: fields,
+      highestVolumeSet: { volume: 510.29, ...fields },
+      bestEstimatedOneRepMax: { estimatedOneRepMax: 119.07, ...fields },
+    });
+  });
 });

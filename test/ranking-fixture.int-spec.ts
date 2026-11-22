@@ -85,6 +85,27 @@ const SCENARIOS: {
     expected: { weight: [0, 2], volume: [1, 1], e1rm: [1, 1] },
   },
   {
+    // An exact pound volume tie a week apart: 135 lb × 4 and 180 lb × 3 are
+    // both 540 lb (244.9398798 kg). The earlier set keeps the record; weights
+    // rounded to two kg decimals would give 244.92 against 244.95.
+    name: 'Barbell Row',
+    entries: [
+      { date: D1, sets: [lb(135, 4)] },
+      { date: '2025-02-10T06:00:00+07:00', sets: [lb(180, 3)] },
+    ],
+    expected: { weight: [1, 1], volume: [0, 1], e1rm: [1, 1] },
+  },
+  {
+    // A high-rep set holds the estimated 1RM: 60 × (30 + 30) = 3600 beats
+    // 100 × (30 + 5) = 3500. Epley applies at every rep count (§7).
+    name: 'Leg Press',
+    entries: [
+      { date: D1, sets: [kg(100, 5)] },
+      { date: D2, sets: [kg(60, 30)] },
+    ],
+    expected: { weight: [0, 1], volume: [1, 1], e1rm: [1, 1] },
+  },
+  {
     // Zero-weight sets only: every score is 0, so the first set wins.
     name: 'Pull Up',
     entries: [

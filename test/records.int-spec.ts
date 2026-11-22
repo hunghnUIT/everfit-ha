@@ -91,6 +91,17 @@ describe('personal records (design §9.3)', () => {
         "No entries found for exercise 'bench' in this range. This filter matches the whole exercise name; " +
         'GET /v1/users/u_pr/workout-entries?exercise=bench lists the names that contain it.',
     });
+
+    // Half of a two-word name, the common empty case: the key is quoted as
+    // normalised, and percent-encoded in the URL it points at.
+    const partial = withStatus(
+      await records('u_pr', '?exercise=Bench%20%20Pr'),
+      200,
+    );
+    expect(partial.body.message).toBe(
+      "No entries found for exercise 'bench pr' in this range. This filter matches the whole exercise name; " +
+        'GET /v1/users/u_pr/workout-entries?exercise=bench%20pr lists the names that contain it.',
+    );
   });
 
   it('a ranged request returns records from the range only', async () => {
