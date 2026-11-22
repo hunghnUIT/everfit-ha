@@ -308,7 +308,7 @@ describe('DatabaseExerciseCatalog', () => {
   });
 
   it('boot gives up after the deadline and throws', async () => {
-    const { load, catalog } = setup();
+    const { load, warn, catalog } = setup();
     load.mockRejectedValue(dbDown());
 
     const init = catalog.onModuleInit();
@@ -317,6 +317,12 @@ describe('DatabaseExerciseCatalog', () => {
     );
     await jest.advanceTimersByTimeAsync(DEADLINE_MS - 1);
     expect(load.mock.calls.length).toBeGreaterThan(1);
+    // Each failed attempt logs the driver's code and the error's name only.
+    expect(warn).toHaveBeenLastCalledWith(
+      { code: 'ECONNREFUSED', errorName: 'Error' },
+      'Catalog load at boot failed; trying again',
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('10.0.0.5');
     await jest.advanceTimersByTimeAsync(1);
     await outcome;
 

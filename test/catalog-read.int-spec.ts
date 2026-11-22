@@ -177,11 +177,22 @@ describe('catalog read routes', () => {
     const snapshot = catalogOf(app).snapshot();
     expect(snapshot.hasMuscleGroup('neck')).toBe(false);
     expect(snapshot.muscleGroupsFor('neck curl')).toEqual([]);
+  });
+
+  it('after refresh() the snapshot holds an exercise inserted by SQL, its groups in position order', async () => {
+    await insertBySql('serratus', 'Serratus Punch', 'serratus punch', [
+      'shoulders',
+      'serratus',
+    ]);
+    expect(catalogOf(app).snapshot().hasMuscleGroup('serratus')).toBe(false);
 
     await catalogOf(app).refresh();
-    expect(catalogOf(app).snapshot().muscleGroupsFor('neck curl')).toEqual([
-      'traps',
-      'neck',
+
+    const snapshot = catalogOf(app).snapshot();
+    expect(snapshot.hasMuscleGroup('serratus')).toBe(true);
+    expect(snapshot.muscleGroupsFor('serratus punch')).toEqual([
+      'shoulders',
+      'serratus',
     ]);
   });
 
