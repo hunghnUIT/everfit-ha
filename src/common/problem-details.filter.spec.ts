@@ -1,12 +1,16 @@
 import {
+  ArgumentsHost,
   BadRequestException,
   HttpException,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { DrizzleQueryError } from 'drizzle-orm';
+import { DatabaseError } from 'pg';
 import { ApiProblem, driverErrorCode } from './problem';
-import { toApiProblem } from './problem-details.filter';
+import { ProblemDetailsFilter, toApiProblem } from './problem-details.filter';
 
 // What pg rejects with: an Error carrying a SQLSTATE or a socket error code.
 const pgError = (code: string) =>
@@ -139,5 +143,101 @@ describe('toApiProblem', () => {
     expect(problem).toMatchObject({ status: 500, code: 'INTERNAL_ERROR' });
     expect(problem.detail).not.toMatch(/weightKg|TypeError|undefined/);
     expect(problem.errors).toBeUndefined();
+  });
+});
+
+describe('ProblemDetailsFilter, the 500 log line', () => {
+  // Runs the filter on one exception and returns what Logger.error received.
+  function loggedFor(exception: unknown): unknown[][] {
+    const error = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    const res = {
+      setHeader: jest.fn(),
+      status: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      type: jest.fn().mockReturnThis(),
+      json: jest.fn().mockReturnThis(),
+    };
+    // req.log is set, as pino-http sets it, so only the 500 line is written.
+    const req = {
+      id: 'request-500',
+      headers: {},
+      method: 'POST',
+      originalUrl: '/v1/users/u_1/workout-entries',
+      log: {},
+    };
+    const host = {
+      switchToHttp: () => ({ getRequest: () => req, getResponse: () => res }),
+    } as unknown as ArgumentsHost;
+    try {
+      new ProblemDetailsFilter().catch(exception, host);
+      expect(res.status).toHaveBeenCalledWith(500);
+      return error.mock.calls;
+    } finally {
+      error.mockRestore();
+    }
+  }
+
+  it('a failed statement logs the statement text and code, never a bound value or the driver message', () => {
+    // What a failed write throws: Drizzle's wrapper, whose message and stack
+    // list every parameter, around pg's error, whose message and detail can
+    // quote a value.
+    const driver = Object.assign(
+      new DatabaseError(
+        'value too long for type character varying: driver-secret-message',
+        0,
+        'error',
+      ),
+      { code: '22001', detail: 'Failing row contains (param-secret-name).' },
+    );
+    const statement =
+      'insert into "workout_entries" ("user_id", "exercise_name") values ($1, $2)';
+    const exception = new DrizzleQueryError(
+      statement,
+      ['param-secret-user', 'param-secret-name'],
+      driver,
+    );
+
+    const calls = loggedFor(exception);
+    expect(calls).toEqual([
+      [
+        {
+          requestId: 'request-500',
+          errorName: 'DrizzleQueryError',
+          code: '22001',
+          query: statement,
+        },
+        'Unhandled error',
+      ],
+    ]);
+    const written = JSON.stringify(calls);
+    expect(written).not.toMatch(/param-secret|driver-secret/);
+  });
+
+  it("the driver's own error, unwrapped, logs its class and code only", () => {
+    const driver = Object.assign(
+      new DatabaseError(
+        'canceling statement: driver-secret-message',
+        0,
+        'error',
+      ),
+      { code: '57014' },
+    );
+    expect(loggedFor(driver)).toEqual([
+      [
+        { requestId: 'request-500', errorName: 'DatabaseError', code: '57014' },
+        'Unhandled error',
+      ],
+    ]);
+  });
+
+  it('any other error keeps its message and stack (err), which hold no request data', () => {
+    const bug = new TypeError(
+      "Cannot read properties of undefined (reading 'x')",
+    );
+    expect(loggedFor(bug)).toEqual([
+      [{ err: bug, requestId: 'request-500' }, 'Unhandled error'],
+    ]);
   });
 });

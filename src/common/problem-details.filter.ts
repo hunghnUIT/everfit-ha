@@ -5,9 +5,11 @@ import {
   HttpException,
   Logger,
 } from '@nestjs/common';
+import { DrizzleQueryError } from 'drizzle-orm';
 import type { Request, Response } from 'express';
 import get from 'lodash/get';
 import kebabCase from 'lodash/kebabCase';
+import { DatabaseError } from 'pg';
 import { JSON_ONLY_DETAIL } from './json-only.middleware';
 import { BODY_LIMIT } from './limits';
 import { requestIdOf } from './logger';
@@ -71,6 +73,26 @@ const isConnectionFailure = (code: string | undefined) =>
   code !== undefined &&
   (UNREACHABLE_DATABASE_CODES.has(code) || /^08[0-9A-Z]{3}$/.test(code));
 
+// The 500 line of a failed statement (design §13: no bodies logged). Drizzle's
+// wrapper puts every bound value in its message and stack, and the driver's
+// message and detail can quote one; so only the class, the SQLSTATE and the
+// statement text with its $n placeholders are logged. Any other error keeps
+// its message and stack, which a bug needs and which hold no request data.
+function errorLogFields(exception: unknown): Record<string, unknown> {
+  const cause: unknown = get(exception, 'cause');
+  const isDatabaseError =
+    exception instanceof DrizzleQueryError ||
+    exception instanceof DatabaseError ||
+    cause instanceof DatabaseError;
+  if (!isDatabaseError) return { err: exception };
+  const query: unknown = get(exception, 'query');
+  return {
+    errorName: get(exception, 'constructor.name'),
+    code: driverErrorCode(exception),
+    ...(typeof query === 'string' && { query }),
+  };
+}
+
 function fromHttpException(exception: HttpException): ApiProblem {
   const code = CODE_FOR_STATUS[exception.getStatus()];
   if (code === undefined) return problemOf(500, 'INTERNAL_ERROR');
@@ -114,7 +136,10 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     const requestId = requestIdOf(req, res);
     const instance = req.originalUrl.split('?', 1)[0];
     if (problem.status === 500) {
-      this.logger.error({ err: exception, requestId }, 'Unhandled error');
+      this.logger.error(
+        { ...errorLogFields(exception), requestId },
+        'Unhandled error',
+      );
     }
     // The code alone: the driver's message may name the database host.
     const driverCode = driverErrorCode(exception);
