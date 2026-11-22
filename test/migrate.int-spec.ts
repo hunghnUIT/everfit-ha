@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { v7 } from 'uuid';
 import { runMigrateStep } from '../src/database/migrator';
+import { DEFAULT_SEED_PATH } from '../src/exercises/catalog-seed';
 import { createEmptyDatabase, query } from './support/database';
 
 // The project keeps real dates out of files; Drizzle reads `when` only for order.
@@ -56,6 +57,19 @@ const migrateEnv = (url: string) => ({
   LOG_LEVEL: 'fatal' as const,
 });
 
+const journalEntries = () =>
+  (JSON.parse(readFileSync(JOURNAL, 'utf8')) as { entries: unknown[] }).entries
+    .length;
+
+const countIn = async (url: string, table: string) =>
+  (
+    await query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM ${table}`,
+      [],
+      url,
+    )
+  )[0].n;
+
 const appliedMigrations = async (url: string) =>
   (
     await query<{ n: number }>(
@@ -102,7 +116,7 @@ describe('migrate', () => {
     const url = await createEmptyDatabase();
     await runMigrateStep(migrateEnv(url));
     await runMigrateStep(migrateEnv(url));
-    await expect(appliedMigrations(url)).resolves.toBe(1);
+    await expect(appliedMigrations(url)).resolves.toBe(journalEntries());
     await expect(query('SELECT 1 FROM workout_sets', [], url)).resolves.toEqual(
       [],
     );
@@ -116,7 +130,18 @@ describe('migrate', () => {
       runMigrateStep(migrateEnv(url)),
       runMigrateStep(migrateEnv(url)),
     ]);
-    await expect(appliedMigrations(url)).resolves.toBe(1);
+    await expect(appliedMigrations(url)).resolves.toBe(journalEntries());
+    // The seed ran under the same lock: each item once.
+    const seed = JSON.parse(readFileSync(DEFAULT_SEED_PATH, 'utf8')) as {
+      muscleGroups: unknown[];
+      exercises: unknown[];
+    };
+    await expect(countIn(url, 'exercises')).resolves.toBe(
+      seed.exercises.length,
+    );
+    await expect(countIn(url, 'catalog_seed_ledger')).resolves.toBe(
+      seed.muscleGroups.length + seed.exercises.length,
+    );
   });
 
   it('the test database session zone is America/Los_Angeles', async () =>

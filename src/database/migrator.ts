@@ -2,7 +2,13 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { join } from 'node:path';
 import { Pool, PoolClient } from 'pg';
+import pino from 'pino';
 import { MigrateEnv } from '../config/env';
+import {
+  DEFAULT_SEED_PATH,
+  readSeedFile,
+  runSeed,
+} from '../exercises/catalog-seed';
 import { MIGRATE_LOCK } from './locks';
 
 // Next to this file: dist/database/migrations in the build (nest-cli.json
@@ -16,13 +22,17 @@ export async function runMigrations(client: PoolClient): Promise<void> {
 }
 
 // The one-shot step compose runs before api (design §13): one connection,
-// under MIGRATE_LOCK, the migrations, then (from Task 8) the catalog seed.
-// No statement_timeout is set: a migration is never cut off by a limit sized
-// for requests.
+// under MIGRATE_LOCK, the migrations, then the catalog seed (§10.3). The seed
+// file is read and validated first, so an invalid file throws SeedFileError
+// before any lock, migration or write. No statement_timeout is set: a
+// migration is never cut off by a limit sized for requests.
 export async function runMigrateStep(
   env: MigrateEnv,
-  _opts: { seedPath?: string } = {},
+  opts: { seedPath?: string } = {},
 ): Promise<void> {
+  const seed = readSeedFile(opts.seedPath ?? DEFAULT_SEED_PATH);
+  // The seed's warnings (a group an admin deleted) go to the step's log.
+  const logger = pino({ name: 'migrate', level: env.LOG_LEVEL });
   const pool = new Pool({ connectionString: env.DATABASE_URL, max: 1 });
   try {
     const client = await pool.connect();
@@ -30,6 +40,7 @@ export async function runMigrateStep(
       await client.query('SELECT pg_advisory_lock($1)', [MIGRATE_LOCK]);
       try {
         await runMigrations(client);
+        await runSeed(client, seed, (line) => logger.warn(line));
       } finally {
         await client.query('SELECT pg_advisory_unlock($1)', [MIGRATE_LOCK]);
       }

@@ -43,3 +43,47 @@ export const workoutSets = pgTable(
   },
   (table) => [primaryKey({ columns: [table.entryId, table.setNumber] })],
 );
+
+// The catalog (design §5 "Catalog tables"). The group's foreign key keeps the
+// default NO ACTION in the SQL; it is not repeated here.
+
+export const muscleGroups = pgTable('muscle_groups', {
+  name: text('name').primaryKey(),
+  createdAt: timestamp('created_at', { precision: 3, withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const exercises = pgTable('exercises', {
+  exerciseKey: text('exercise_key').primaryKey(),
+  name: text('name').notNull(),
+  createdAt: timestamp('created_at', { precision: 3, withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { precision: 3, withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const exerciseMuscleGroups = pgTable(
+  'exercise_muscle_groups',
+  {
+    exerciseKey: text('exercise_key').notNull(),
+    muscleGroup: text('muscle_group').notNull(),
+    // The group's index in the list as written, primary mover first.
+    position: smallint('position').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.exerciseKey, table.muscleGroup] })],
+);
+
+export const catalogSeedLedger = pgTable(
+  'catalog_seed_ledger',
+  {
+    kind: text('kind', { enum: ['exercise', 'muscle_group'] }).notNull(),
+    itemKey: text('item_key').notNull(),
+    seededAt: timestamp('seeded_at', { precision: 3, withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.kind, table.itemKey] })],
+);
