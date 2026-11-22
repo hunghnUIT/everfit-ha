@@ -8,6 +8,39 @@ import { workoutEntries } from '../src/database/schema';
 import { pgArray, toDate } from '../src/database/sql';
 import { Database, DB, PG_POOL } from '../src/database/tokens';
 import { createTestApp } from './support/app';
+import { query } from './support/database';
+
+const URL_TEXT = process.env.DATABASE_URL ?? '';
+const DRIVER_MESSAGE = 'terminating connection due to administrator command';
+
+// The warn lines the Database logger writes, recorded at its Nest Logger: the
+// harness mutes the real output (LOG_LEVEL=fatal).
+function recordDatabaseWarnings(): unknown[][] {
+  const warnings: unknown[][] = [];
+  jest.spyOn(Logger.prototype, 'warn').mockImplementation(function (
+    this: Logger,
+    ...args: unknown[]
+  ) {
+    if (get(this, 'context') === 'Database') warnings.push(args);
+  });
+  return warnings;
+}
+
+// No line carries the URL, its password or the driver's message.
+function expectNoSecrets(warnings: unknown[][]): void {
+  const written = JSON.stringify(warnings);
+  expect(written).not.toContain(new URL(URL_TEXT).host);
+  expect(written).not.toContain(`:${new URL(URL_TEXT).password}@`);
+  expect(written).not.toContain(DRIVER_MESSAGE);
+}
+
+// Polls a condition for up to five seconds.
+async function until(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100 && !condition(); attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  expect(condition()).toBe(true);
+}
 
 describe('database', () => {
   let app: INestApplication;
@@ -66,46 +99,29 @@ describe('database', () => {
     );
   });
 
-  it('an idle connection error logs one warn line with the code only', () => {
-    const warnings: unknown[][] = [];
-    jest.spyOn(Logger.prototype, 'warn').mockImplementation(function (
-      this: Logger,
-      ...args: unknown[]
-    ) {
-      if (get(this, 'context') === 'Database') warnings.push(args);
-    });
+  it('a pool-level error (an idle client) is handled without a line of its own and does not throw', () => {
+    const warnings = recordDatabaseWarnings();
     const pool = app.get<Pool>(PG_POOL);
-    const url = process.env.DATABASE_URL ?? '';
     const error = Object.assign(
-      new Error(`terminating connection due to administrator command ${url}`),
+      new Error('terminating connection due to administrator command'),
       { code: '57P01' },
     );
 
     expect(() => pool.emit('error', error)).not.toThrow();
 
-    expect(warnings).toEqual([
-      [{ code: '57P01' }, 'Idle database connection failed'],
-    ]);
-    expect(JSON.stringify(warnings)).not.toContain(new URL(url).host);
+    // The client's own listener writes the one line for this failure.
+    expect(warnings).toEqual([]);
   });
 
   it('a connection in use that fails logs one warn line with the code and name only, and does not throw', async () => {
     // pg-pool removes its own error listener when it hands a client out, so
     // without one of the app's, a lost connection mid-query is an unhandled
     // 'error' event that ends the process.
-    const warnings: unknown[][] = [];
-    jest.spyOn(Logger.prototype, 'warn').mockImplementation(function (
-      this: Logger,
-      ...args: unknown[]
-    ) {
-      if (get(this, 'context') === 'Database') warnings.push(args);
-    });
+    const warnings = recordDatabaseWarnings();
     const pool = app.get<Pool>(PG_POOL);
-    const url = process.env.DATABASE_URL ?? '';
-    const error = Object.assign(
-      new Error(`Connection terminated unexpectedly ${url}`),
-      { code: '57P01' },
-    );
+    const error = Object.assign(new Error(`${DRIVER_MESSAGE} ${URL_TEXT}`), {
+      code: '57P01',
+    });
     const client = await pool.connect();
     try {
       expect(client.listenerCount('error')).toBeGreaterThan(0);
@@ -115,11 +131,27 @@ describe('database', () => {
     }
 
     expect(warnings).toEqual([
-      [
-        { code: '57P01', name: 'Error' },
-        'Database connection failed while in use',
-      ],
+      [{ code: '57P01', name: 'Error' }, 'Database connection failed'],
     ]);
-    expect(JSON.stringify(warnings)).not.toContain(new URL(url).host);
+    expectNoSecrets(warnings);
+  });
+
+  it('an idle connection whose backend is terminated logs exactly one warn line, code 57P01', async () => {
+    const warnings = recordDatabaseWarnings();
+    const pool = app.get<Pool>(PG_POOL);
+    // The client that answers goes back to the pool idle.
+    const { rows } = await pool.query<{ pid: number }>(
+      'SELECT pg_backend_pid() AS pid',
+    );
+    const before = pool.totalCount;
+    await query('SELECT pg_terminate_backend($1)', [rows[0].pid]);
+    await until(() => pool.totalCount < before);
+    // Long enough for a second listener's line, if there were one.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(warnings).toEqual([
+      [{ code: '57P01', name: 'error' }, 'Database connection failed'],
+    ]);
+    expectNoSecrets(warnings);
   });
 });
