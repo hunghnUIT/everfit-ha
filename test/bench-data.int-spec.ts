@@ -1,7 +1,9 @@
 import {
   BG_PREFIX,
   generateBenchData,
+  BENCH_ANCHOR,
   HEAVY_USER,
+  insertFreshHeavyEntries,
   SINGLE_USER,
 } from '../scripts/bench-data';
 import { loadContext } from '../scripts/bench';
@@ -141,5 +143,45 @@ describe('benchmark data (design §11, at 1 % scale)', () => {
     expect(MAINS).toContain(ctx.topKey);
     expect(ctx.rareKey).not.toBe(ctx.topKey);
     expect(ctx.rareGroup.length).toBeGreaterThan(0);
+  });
+});
+
+describe('fresh heavy inserts (the second benchmark pass, §11)', () => {
+  beforeAll(async () => {
+    await generateBenchData(process.env.DATABASE_URL ?? '', SCALE);
+  });
+
+  const heavyCount = async () =>
+    Number(
+      (
+        await query<{ n: string }>(
+          `SELECT count(*) AS n FROM workout_entries WHERE user_id = $1`,
+          [HEAVY_USER],
+        )
+      )[0].n,
+    );
+
+  it('adds the asked number of entries, all newer than the loaded data, with 3 or 4 sets each, in sessions of 8', async () => {
+    const before = await heavyCount();
+    await insertFreshHeavyEntries(process.env.DATABASE_URL ?? '', 80);
+    expect(await heavyCount()).toBe(before + 80);
+    const fresh = await query<{ sets: string; at: string }>(
+      `SELECT count(s.*) AS sets, e.performed_at::text AS at
+         FROM workout_entries e JOIN workout_sets s ON s.entry_id = e.id
+        WHERE e.user_id = $1 AND e.performed_at > $2::timestamptz + interval '12 hours'
+        GROUP BY e.id, e.performed_at`,
+      [HEAVY_USER, BENCH_ANCHOR],
+    );
+    expect(fresh).toHaveLength(80);
+    for (const { sets } of fresh) {
+      expect([3, 4]).toContain(Number(sets));
+    }
+    expect(new Set(fresh.map((f) => f.at)).size).toBe(10);
+  });
+
+  it('replaces its own earlier rows when it runs again', async () => {
+    const before = await heavyCount();
+    await insertFreshHeavyEntries(process.env.DATABASE_URL ?? '', 80);
+    expect(await heavyCount()).toBe(before);
   });
 });

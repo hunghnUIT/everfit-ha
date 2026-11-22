@@ -153,10 +153,7 @@ function vocabEntry(
   };
 }
 
-function withQuotas(
-  n: number,
-  rows: ReturnType<typeof vocabEntry>[],
-): Vocab[] {
+function withQuotas(n: number, rows: ReturnType<typeof vocabEntry>[]): Vocab[] {
   const quotas = apportion(
     n,
     rows.map((r) => r.weight),
@@ -216,7 +213,9 @@ export function planUsers(
 ): UserPlan[] {
   const heavyEntries = Math.round(HEAVY_ENTRIES * scale);
   if (heavyEntries < 100) {
-    throw new Error('BENCH_SCALE is too small: the heavy user needs 100 entries');
+    throw new Error(
+      'BENCH_SCALE is too small: the heavy user needs 100 entries',
+    );
   }
   const backgroundUsers = Math.max(
     1,
@@ -367,7 +366,9 @@ export async function generateBenchData(
   try {
     const catalog = await readCatalog(client);
     if (catalog.length === 0) {
-      throw new Error('the exercise catalog is empty; run the migrate step first');
+      throw new Error(
+        'the exercise catalog is empty; run the migrate step first',
+      );
     }
     const t = planTables(planUsers(scale, catalog));
 
@@ -385,7 +386,14 @@ export async function generateBenchData(
     await client.query(
       `INSERT INTO bench_users SELECT * FROM unnest(
          $1::text[], $2::text[], $3::int[], $4::bigint[], $5::text[], $6::int[])`,
-      [t.users.id, t.users.grp, t.users.n, t.users.stride, t.users.unit, t.users.offset],
+      [
+        t.users.id,
+        t.users.grp,
+        t.users.n,
+        t.users.stride,
+        t.users.unit,
+        t.users.offset,
+      ],
     );
     await client.query(
       `INSERT INTO bench_vocab SELECT * FROM unnest(
@@ -405,11 +413,18 @@ export async function generateBenchData(
     await client.query(
       `INSERT INTO bench_sessions SELECT * FROM unnest(
          $1::text[], $2::int[], $3::int[], $4::int[])`,
-      [t.sessions.userId, t.sessions.firstI, t.sessions.size, t.sessions.minutes],
+      [
+        t.sessions.userId,
+        t.sessions.firstI,
+        t.sessions.size,
+        t.sessions.minutes,
+      ],
     );
 
     // A second run replaces the first; the sets go with their entries.
-    await client.query(`DELETE FROM workout_entries WHERE user_id LIKE 'bench-%'`);
+    await client.query(
+      `DELETE FROM workout_entries WHERE user_id LIKE 'bench-%'`,
+    );
 
     // One row per entry, with the exercise its position in the quota ranges
     // gives it. The ids are generated here, in date order, so the sets can
@@ -501,6 +516,81 @@ export async function generateBenchData(
   }
 }
 
+// The second benchmark pass (§11): fresh inserts for the heavy user, newer
+// than everything loaded, written in one statement per table and followed by
+// no VACUUM, so the planner and the visibility map are as stale as they are
+// after a busy day. The shape is the data's: sessions of 8 entries that share
+// one instant (one local morning each, a day after the last), exercises drawn
+// from the heavy user's own vocabulary and skewed to its most-trained, three
+// or four sets of 5 reps at a weight in 2.5 kg steps. Rows from an earlier
+// call are removed first, so a run can be repeated.
+const FRESH_SESSION_SIZE = 8;
+
+export async function removeFreshHeavyEntries(client: Client): Promise<void> {
+  await client.query(
+    `DELETE FROM workout_entries
+      WHERE user_id = $1 AND performed_at > $2::timestamptz + interval '12 hours'`,
+    [HEAVY_USER, BENCH_ANCHOR],
+  );
+}
+
+export async function insertFreshHeavyEntries(
+  databaseUrl: string,
+  count: number,
+): Promise<number> {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    await client.query('BEGIN');
+    await removeFreshHeavyEntries(client);
+    await client.query(
+      `CREATE TEMP TABLE bench_fresh ON COMMIT DROP AS
+       WITH vocab AS (
+         SELECT array_agg(exercise_key ORDER BY n DESC, exercise_key) AS keys
+           FROM (SELECT exercise_key, count(*) AS n FROM workout_entries
+                  WHERE user_id = $1 GROUP BY exercise_key) t
+       )
+       SELECT uuidv7() AS id, f.i, f.performed_at,
+              v.keys[f.pick] AS exercise_key,
+              (3 + f.i % 2) AS nsets
+         FROM (
+           SELECT i,
+                  $2::timestamptz + make_interval(
+                    mins => ((i / $4::int) + 1) * 1440 + (6 + (i / $4::int) % 3) * 60
+                            + ((i / $4::int) * 7) % 60 - 420) AS performed_at,
+                  1 + floor(array_length(vocab.keys, 1)
+                            * power(((i::bigint * 2654435761) % 1000003) / 1000003.0, 3))::int AS pick
+             FROM generate_series(0, $3::int - 1) AS i, vocab
+         ) f, vocab v
+        ORDER BY f.performed_at, f.i`,
+      [HEAVY_USER, BENCH_ANCHOR, count, FRESH_SESSION_SIZE],
+    );
+    await client.query(
+      `INSERT INTO workout_entries
+         (id, user_id, exercise_name, exercise_key, performed_at, utc_offset_minutes)
+       SELECT b.id, $1, coalesce(x.name, b.exercise_key), b.exercise_key,
+              b.performed_at, 420
+         FROM bench_fresh b
+         LEFT JOIN exercises x ON x.exercise_key = b.exercise_key
+        ORDER BY b.performed_at, b.i`,
+      [HEAVY_USER],
+    );
+    await client.query(
+      `INSERT INTO workout_sets (entry_id, set_number, reps, weight, unit, weight_kg)
+       SELECT b.id, k, 5, 2.5 * (20 + (b.i + k) % 20), 'kg', 2.5 * (20 + (b.i + k) % 20)
+         FROM bench_fresh b CROSS JOIN LATERAL generate_series(1, b.nsets) AS k
+        ORDER BY b.id, k`,
+    );
+    await client.query('COMMIT');
+    return count;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
+
 async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error('DATABASE_URL is not set');
@@ -510,8 +600,12 @@ async function main(): Promise<void> {
   }
   const r = await generateBenchData(databaseUrl, scale);
   console.log(`bench:data scale ${scale}`);
-  console.log(`  ${HEAVY_USER}: ${r.heavyEntries} entries, ${r.heavySets} sets`);
-  console.log(`  ${SINGLE_USER}: ${r.singleEntries} entries, ${r.singleSets} sets`);
+  console.log(
+    `  ${HEAVY_USER}: ${r.heavyEntries} entries, ${r.heavySets} sets`,
+  );
+  console.log(
+    `  ${SINGLE_USER}: ${r.singleEntries} entries, ${r.singleSets} sets`,
+  );
   console.log(
     `  ${BG_PREFIX}*: ${r.backgroundUsers} users, ${r.backgroundEntries} entries, ${r.backgroundSets} sets`,
   );
@@ -521,7 +615,10 @@ async function main(): Promise<void> {
 if (require.main === module) {
   main().catch((error: unknown) => {
     // The message never carries the database URL (pg errors name the host only).
-    console.error('bench:data failed:', error instanceof Error ? error.message : error);
+    console.error(
+      'bench:data failed:',
+      error instanceof Error ? error.message : error,
+    );
     process.exit(1);
   });
 }

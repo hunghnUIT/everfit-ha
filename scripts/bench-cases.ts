@@ -21,7 +21,7 @@ import {
   readHistoryQuery,
 } from '../src/workouts/history-query';
 import type { BenchCase, BenchContext } from './bench';
-import { BENCH_ANCHOR, HEAVY_USER } from './bench-data';
+import { BENCH_ANCHOR, HEAVY_USER, SINGLE_USER } from './bench-data';
 
 // The catalog the benchmark database was seeded with: the seed file, which
 // is what the API's snapshot holds there. Read once, on first use.
@@ -35,10 +35,13 @@ const seedSnapshot = once(() => {
 
 // The query parameters go through readHistoryQuery as the API reads them,
 // so the explained SQL is the statement the timed requests run.
-function historyQuery(params: Record<string, string>): HistoryQuery {
+function historyQuery(
+  user: string,
+  params: Record<string, string>,
+): HistoryQuery {
   const result = readHistoryQuery(
     plainToInstance(HistoryQueryDto, params),
-    HEAVY_USER,
+    user,
     seedSnapshot(),
     SHARED_UNIT_REGISTRY,
   );
@@ -50,14 +53,16 @@ function historyCase(
   name: string,
   params: (ctx: BenchContext) => Record<string, string>,
   budgetP95Ms?: number,
+  user: string = HEAVY_USER,
 ): BenchCase {
   return {
     name,
+    user,
     path: (ctx) => {
       const qs = new URLSearchParams(params(ctx)).toString();
-      return `/v1/users/${HEAVY_USER}/workout-entries${qs ? `?${qs}` : ''}`;
+      return `/v1/users/${user}/workout-entries${qs ? `?${qs}` : ''}`;
     },
-    sql: (ctx) => buildHistoryIdsQuery(historyQuery(params(ctx))),
+    sql: (ctx) => buildHistoryIdsQuery(historyQuery(user, params(ctx))),
     budgetP95Ms,
   };
 }
@@ -68,18 +73,20 @@ function recordsCase(
   name: string,
   params: (ctx: BenchContext) => Record<string, string>,
   budgetP95Ms?: number,
+  user: string = HEAVY_USER,
 ): BenchCase {
   return {
     name,
+    user,
     path: (ctx) =>
-      `/v1/users/${HEAVY_USER}/personal-records?${new URLSearchParams(params(ctx)).toString()}`,
+      `/v1/users/${user}/personal-records?${new URLSearchParams(params(ctx)).toString()}`,
     sql: (ctx) => {
       const result = readRecordsQuery(
         plainToInstance(RecordsQueryDto, params(ctx)),
         SHARED_UNIT_REGISTRY,
       );
       if (!result.ok) throw new Error(JSON.stringify(result.errors));
-      return buildRecordsQuery(HEAVY_USER, result.value.key, result.value);
+      return buildRecordsQuery(user, result.value.key, result.value);
     },
     budgetP95Ms,
   };
@@ -92,22 +99,20 @@ function compareCase(
   name: string,
   params: (ctx: BenchContext) => Record<string, string>,
   budgetP95Ms?: number,
+  user: string = HEAVY_USER,
 ): BenchCase {
   return {
     name,
+    user,
     path: (ctx) =>
-      `/v1/users/${HEAVY_USER}/personal-records/compare?${new URLSearchParams(params(ctx)).toString()}`,
+      `/v1/users/${user}/personal-records/compare?${new URLSearchParams(params(ctx)).toString()}`,
     sql: (ctx) => {
       const result = readCompareQuery(
         plainToInstance(CompareQueryDto, params(ctx)),
         SHARED_UNIT_REGISTRY,
       );
       if (!result.ok) throw new Error(JSON.stringify(result.errors));
-      return buildRecordsQuery(
-        HEAVY_USER,
-        result.value.key,
-        result.value.current,
-      );
+      return buildRecordsQuery(user, result.value.key, result.value.current);
     },
     budgetP95Ms,
   };
@@ -177,5 +182,52 @@ export const BENCH_CASES: BenchCase[] = [
     'compare: most-trained exercise, two adjacent months',
     (ctx) => ({ exercise: ctx.topKey, ...ADJACENT_MONTHS }),
     50,
+  ),
+];
+
+// The statement timeout the API runs with (the compose default is 5000).
+const STATEMENT_TIMEOUT_MS = Number(
+  process.env.DB_STATEMENT_TIMEOUT_MS ?? '5000',
+);
+
+// The single-exercise user (§11): every endpoint answers inside the statement
+// timeout, and its PRs in under 500 ms. Its one exercise is the catalog's
+// "bench press", the heavy user's top key too.
+export const SINGLE_USER_CASES: BenchCase[] = [
+  historyCase(
+    'bench-single history: first page',
+    () => ({}),
+    STATEMENT_TIMEOUT_MS,
+    SINGLE_USER,
+  ),
+  historyCase(
+    'bench-single history: deep page',
+    () => ({ cursor: DEEP_CURSOR }),
+    STATEMENT_TIMEOUT_MS,
+    SINGLE_USER,
+  ),
+  historyCase(
+    'bench-single history: term that matches nothing',
+    () => ({ exercise: 'bnech' }),
+    STATEMENT_TIMEOUT_MS,
+    SINGLE_USER,
+  ),
+  recordsCase(
+    'bench-single PRs: all-time',
+    (ctx) => ({ exercise: ctx.topKey }),
+    500,
+    SINGLE_USER,
+  ),
+  recordsCase(
+    'bench-single PRs: last year',
+    (ctx) => ({ exercise: ctx.topKey, ...LAST_YEAR }),
+    500,
+    SINGLE_USER,
+  ),
+  compareCase(
+    'bench-single compare: two adjacent months',
+    (ctx) => ({ exercise: ctx.topKey, ...ADJACENT_MONTHS }),
+    STATEMENT_TIMEOUT_MS,
+    SINGLE_USER,
   ),
 ];
