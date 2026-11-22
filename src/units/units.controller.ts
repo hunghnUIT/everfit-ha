@@ -1,5 +1,6 @@
 import { Controller, Get, Inject } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { UnitsEnvelopeDto } from './dto/unit-response.dto';
 import { UNIT_REGISTRY, UnitRegistry } from './unit-registry';
 
 @ApiTags('units')
@@ -9,6 +10,10 @@ export class UnitsController {
 
   @Get()
   @ApiOperation({ summary: 'Supported units and their aliases' })
+  @ApiOkResponse({
+    description: 'Each unit code with its aliases.',
+    type: UnitsEnvelopeDto,
+  })
   list() {
     return { data: this.registry.list() };
   }
