@@ -56,6 +56,10 @@ const migrateEnv = (url: string) => ({
   LOG_LEVEL: 'fatal' as const,
 });
 
+const journalEntries = () =>
+  (JSON.parse(readFileSync(JOURNAL, 'utf8')) as { entries: unknown[] }).entries
+    .length;
+
 const appliedMigrations = async (url: string) =>
   (
     await query<{ n: number }>(
@@ -102,7 +106,7 @@ describe('migrate', () => {
     const url = await createEmptyDatabase();
     await runMigrateStep(migrateEnv(url));
     await runMigrateStep(migrateEnv(url));
-    await expect(appliedMigrations(url)).resolves.toBe(1);
+    await expect(appliedMigrations(url)).resolves.toBe(journalEntries());
     await expect(query('SELECT 1 FROM workout_sets', [], url)).resolves.toEqual(
       [],
     );
@@ -116,7 +120,7 @@ describe('migrate', () => {
       runMigrateStep(migrateEnv(url)),
       runMigrateStep(migrateEnv(url)),
     ]);
-    await expect(appliedMigrations(url)).resolves.toBe(1);
+    await expect(appliedMigrations(url)).resolves.toBe(journalEntries());
   });
 
   it('the test database session zone is America/Los_Angeles', async () =>

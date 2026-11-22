@@ -36,7 +36,10 @@ docker compose run --rm --no-deps api sh -c 'test ! -e .env'
 echo "== 4. The image holds no development dependency"
 docker compose run --rm --no-deps api sh -c 'test ! -e node_modules/typescript'
 
-echo "== 5. Clean up"
+echo "== 5. The image holds the catalog seed file"
+docker compose run --rm --no-deps api test -f seed/exercise-catalog.seed.json
+
+echo "== 6. Clean up"
 docker compose down -v
 trap - EXIT
 
