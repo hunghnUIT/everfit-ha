@@ -9,9 +9,20 @@ import {
   Put,
   Res,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiCreatedResponse,
+  ApiNoContentResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
+import { ApiProblems } from '../common/api-docs';
 import type { Response } from 'express';
 import { CatalogService } from './catalog.service';
+import {
+  CatalogExerciseEnvelopeDto,
+  MuscleGroupCreatedEnvelopeDto,
+} from './dto/catalog-response.dto';
 import { ExerciseWriteDto } from './dto/exercise-write.dto';
 import { MuscleGroupWriteDto } from './dto/muscle-group-write.dto';
 
@@ -40,6 +51,18 @@ export class CatalogAdminController {
     summary: 'Add an exercise to the catalog',
     description: OPEN,
   })
+  @ApiCreatedResponse({
+    description:
+      'The exercise. Location is its URL, with the key percent-encoded.',
+    type: CatalogExerciseEnvelopeDto,
+    headers: {
+      Location: {
+        description: 'The URL of the new exercise.',
+        schema: { type: 'string', example: '/v1/exercises/bench%20press' },
+      },
+    },
+  })
+  @ApiProblems(400, 409, 413, 415)
   async createExercise(
     @Body() body: ExerciseWriteDto,
     @Res({ passthrough: true }) res: Response,
@@ -55,6 +78,11 @@ export class CatalogAdminController {
     summary: "Replace an exercise's name spelling and muscle groups",
     description: OPEN,
   })
+  @ApiOkResponse({
+    description: 'The exercise as now stored.',
+    type: CatalogExerciseEnvelopeDto,
+  })
+  @ApiProblems(400, 404, 413, 415)
   async replaceExercise(
     @Param('exerciseKey') exerciseKey: string,
     @Body() body: ExerciseWriteDto,
@@ -68,6 +96,8 @@ export class CatalogAdminController {
     summary: 'Remove an exercise from the catalog; its logged entries stay',
     description: OPEN,
   })
+  @ApiNoContentResponse({ description: 'Removed.' })
+  @ApiProblems(404)
   async deleteExercise(@Param('exerciseKey') exerciseKey: string) {
     await this.service.deleteExercise(exerciseKey);
   }
@@ -78,6 +108,11 @@ export class CatalogAdminController {
     summary: 'Add a muscle group to the closed list',
     description: OPEN,
   })
+  @ApiCreatedResponse({
+    description: 'The group.',
+    type: MuscleGroupCreatedEnvelopeDto,
+  })
+  @ApiProblems(400, 409, 413, 415)
   async createMuscleGroup(@Body() body: MuscleGroupWriteDto) {
     return { data: await this.service.createMuscleGroup(body) };
   }
@@ -88,6 +123,8 @@ export class CatalogAdminController {
     summary: 'Remove a muscle group that no exercise lists',
     description: OPEN,
   })
+  @ApiNoContentResponse({ description: 'Removed.' })
+  @ApiProblems(404, 409)
   async deleteMuscleGroup(@Param('name') name: string) {
     await this.service.deleteMuscleGroup(name);
   }

@@ -1,7 +1,13 @@
 import { Controller, Get, Param } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiProblems } from '../common/api-docs';
 import { ApiProblem } from '../common/problem';
 import { CatalogExerciseRow, CatalogRepository } from './catalog.repository';
+import {
+  CatalogExerciseEnvelopeDto,
+  CatalogExercisesEnvelopeDto,
+  MuscleGroupsEnvelopeDto,
+} from './dto/catalog-response.dto';
 import { exerciseKey } from './exercise-key';
 
 function toBody(row: CatalogExerciseRow) {
@@ -25,6 +31,10 @@ export class ExercisesController {
   @ApiOperation({
     summary: 'The catalog: every exercise with its muscle groups',
   })
+  @ApiOkResponse({
+    description: 'Every exercise, ordered by key. Not paginated.',
+    type: CatalogExercisesEnvelopeDto,
+  })
   async list() {
     const rows = await this.repository.listExercises();
     return { data: rows.map(toBody) };
@@ -34,6 +44,11 @@ export class ExercisesController {
   // "Bench%20Press" and "bench%20press" are the same resource (§10.1).
   @Get('exercises/:exerciseKey')
   @ApiOperation({ summary: 'One catalog exercise' })
+  @ApiOkResponse({
+    description: 'The exercise.',
+    type: CatalogExerciseEnvelopeDto,
+  })
+  @ApiProblems(404)
   async findOne(@Param('exerciseKey') value: string) {
     const key = exerciseKey(value);
     const row = await this.repository.findExercise(key);
@@ -49,6 +64,10 @@ export class ExercisesController {
 
   @Get('muscle-groups')
   @ApiOperation({ summary: 'The known muscle groups' })
+  @ApiOkResponse({
+    description: 'Every group with the number of exercises that list it.',
+    type: MuscleGroupsEnvelopeDto,
+  })
   async listMuscleGroups() {
     return { data: await this.repository.listMuscleGroups() };
   }
