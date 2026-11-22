@@ -30,14 +30,17 @@ async function bootstrap() {
     'Listening',
   );
 }
-// A failed start (for example the catalog's boot deadline, design §10.2)
-// ends as one log line and exit code 1; compose restarts the api. The error's
-// message and stack stay out: a driver's message can name the database host.
+// A failed start (the catalog's boot deadline, design §10.2, or a port
+// already taken) writes one log line and ends the process with exit code 1 at
+// once, whatever still holds the event loop (the pool, the catalog's timer);
+// compose restarts the api. pino flushes its stdout stream synchronously on
+// process exit, so the line is written in full. The error's message and stack
+// stay out: a driver's message can name the database host.
 bootstrap().catch((error: unknown) => {
   new Logger('Bootstrap').fatal(
     { code: driverErrorCode(error), errorName: errorName(error) },
     'The api could not start',
   );
   Logger.flush();
-  process.exitCode = 1;
+  process.exit(1);
 });
