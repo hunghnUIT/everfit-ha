@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import { D, decimalFromNumber, decimalPlaces, display } from './decimal';
 
 describe('decimal', () => {
@@ -20,4 +21,9 @@ describe('decimal', () => {
     expect(decimalFromNumber(0.1).toString()).toBe('0.1'));
 
   it('uses decimal precision 40', () => expect(D.precision).toBe(40));
+
+  it("computes at 40 digits with the library's own constructor too", () =>
+    expect(new Decimal(1).div(3).toString()).toBe(
+      '0.3333333333333333333333333333333333333333',
+    ));
 });
