@@ -32,7 +32,7 @@ curl -fsS --retry 30 --retry-delay 3 --retry-all-errors --max-time 5 \
 echo
 
 echo "== 3. The seeded catalog is served: GET /v1/exercises/bench%20press"
-curl -fsS "http://127.0.0.1:${API_PORT:-3000}/v1/exercises/bench%20press"
+curl -fsS "http://127.0.0.1:${api_port}/v1/exercises/bench%20press"
 echo
 
 echo "== 4. The image holds no .env"
