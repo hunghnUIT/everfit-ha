@@ -14,7 +14,9 @@ const NO_KEYS: readonly string[] = Object.freeze([]);
 
 // The whole catalog as of one load (design §10.2). Built completely, then
 // never changed: a request takes one snapshot and uses it for every lookup,
-// so a response never mixes two loads. Every lookup is synchronous.
+// so a response never mixes two loads. Every lookup is synchronous and
+// exact-match: pass a stored key or exerciseKey()'s output, and a group as
+// muscleGroupName() gives it; nothing here normalises its argument.
 export class CatalogSnapshot {
   private readonly exercises: readonly CatalogExercise[];
   private readonly groups: readonly string[];

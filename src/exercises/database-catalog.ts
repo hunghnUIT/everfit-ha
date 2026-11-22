@@ -1,5 +1,5 @@
 import { Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { driverErrorCode } from '../common/problem';
+import { driverErrorCode, errorName } from '../common/problem';
 import { CatalogLoader } from './catalog-loader';
 import { CatalogSnapshot } from './catalog-snapshot';
 import { ExerciseCatalog } from './exercise-catalog';
@@ -102,7 +102,7 @@ export class DatabaseExerciseCatalog
         } catch (error) {
           if (this.stopped) return;
           this.logger.warn(
-            { code: driverErrorCode(error) },
+            { code: driverErrorCode(error), errorName: errorName(error) },
             'Catalog load at boot failed; trying again',
           );
         }
@@ -131,9 +131,14 @@ export class DatabaseExerciseCatalog
       this.schedule(this.options.refreshMs, false);
     } catch (error) {
       if (this.stopped) return;
+      // Scheduled before the warning, so a logger that throws cannot end the
+      // chain.
+      if (isRetry) this.schedule(this.options.refreshMs, false);
+      else this.schedule(this.options.retryAfterFailureMs, true);
       this.logger.warn(
         {
           code: driverErrorCode(error),
+          errorName: errorName(error),
           snapshotLoadNumber: this.current?.loadNumber,
           snapshotAgeSeconds: Math.round(
             (performance.now() - this.installedAt) / 1000,
@@ -141,8 +146,6 @@ export class DatabaseExerciseCatalog
         },
         'Catalog refresh failed; serving the last snapshot',
       );
-      if (isRetry) this.schedule(this.options.refreshMs, false);
-      else this.schedule(this.options.retryAfterFailureMs, true);
     }
   }
 
@@ -162,7 +165,8 @@ export class DatabaseExerciseCatalog
     this.clearTimer();
     this.timer = setTimeout(() => {
       this.timer = undefined;
-      void this.enqueue(() => this.refreshOnce(isRetry));
+      // Only a throwing logger rejects here, and the retry is already set.
+      this.enqueue(() => this.refreshOnce(isRetry)).catch(() => undefined);
     }, ms);
   }
 

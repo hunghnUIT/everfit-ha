@@ -71,7 +71,12 @@ describe('DatabaseExerciseCatalog', () => {
     expect(catalog.snapshot().loadNumber).toBe(1);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenLastCalledWith(
-      { code: 'ECONNREFUSED', snapshotLoadNumber: 1, snapshotAgeSeconds: 300 },
+      {
+        code: 'ECONNREFUSED',
+        errorName: 'Error',
+        snapshotLoadNumber: 1,
+        snapshotAgeSeconds: 300,
+      },
       'Catalog refresh failed; serving the last snapshot',
     );
     // The driver's message names the host; it is never logged.
@@ -107,6 +112,69 @@ describe('DatabaseExerciseCatalog', () => {
     expect(catalog.snapshot().hasMuscleGroup('neck')).toBe(true);
   });
 
+  it('the warning gives the age of the snapshot being served, not of the first one', async () => {
+    const { load, warn, catalog } = setup();
+    load
+      .mockResolvedValueOnce(rows('a'))
+      .mockResolvedValueOnce(rows('b'))
+      .mockRejectedValueOnce(dbDown());
+    await catalog.onModuleInit();
+
+    // Load 2 is installed at 300 s; load 3 fails at 600 s.
+    await jest.advanceTimersByTimeAsync(REFRESH_MS * 2);
+
+    expect(load).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        snapshotLoadNumber: 2,
+        snapshotAgeSeconds: 300,
+      }),
+      expect.any(String),
+    );
+  });
+
+  it('a failure that is not a driver error logs its name, never its message', async () => {
+    const { load, warn, catalog } = setup();
+    load
+      .mockResolvedValueOnce(rows('a'))
+      .mockResolvedValueOnce({ exercises: null } as unknown as CatalogRows);
+    await catalog.onModuleInit();
+
+    await catalog.refresh();
+
+    expect(warn).toHaveBeenLastCalledWith(
+      {
+        code: undefined,
+        errorName: 'TypeError',
+        snapshotLoadNumber: 1,
+        snapshotAgeSeconds: 0,
+      },
+      'Catalog refresh failed; serving the last snapshot',
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('Cannot read');
+    expect(catalog.snapshot().hasMuscleGroup('a')).toBe(true);
+  });
+
+  it('a timer-driven failure whose warning throws still schedules the retry', async () => {
+    const { load, warn, catalog } = setup();
+    load
+      .mockResolvedValueOnce(rows('a'))
+      .mockRejectedValueOnce(dbDown())
+      .mockResolvedValueOnce(rows('b'));
+    warn.mockImplementationOnce(() => {
+      throw new Error('logger failed');
+    });
+    await catalog.onModuleInit();
+
+    await jest.advanceTimersByTimeAsync(REFRESH_MS);
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(jest.getTimerCount()).toBe(1);
+
+    await jest.advanceTimersByTimeAsync(RETRY_MS);
+    expect(load).toHaveBeenCalledTimes(3);
+    expect(catalog.snapshot().hasMuscleGroup('b')).toBe(true);
+  });
+
   it('a failing refresh() resolves, keeps the snapshot and is retried after 10 s', async () => {
     const { load, catalog } = setup();
     load
@@ -117,6 +185,8 @@ describe('DatabaseExerciseCatalog', () => {
 
     await expect(catalog.refresh()).resolves.toBeUndefined();
     expect(catalog.snapshot().hasMuscleGroup('neck')).toBe(false);
+    // The retry replaced the interval timer: one timer at most.
+    expect(jest.getTimerCount()).toBe(1);
 
     await jest.advanceTimersByTimeAsync(RETRY_MS);
     expect(load).toHaveBeenCalledTimes(3);
@@ -172,6 +242,8 @@ describe('DatabaseExerciseCatalog', () => {
     expect(load).toHaveBeenCalledTimes(3);
     expect(catalog.snapshot().hasMuscleGroup('c')).toBe(true);
     expect(catalog.snapshot().loadNumber).toBe(3);
+    // Each refresh replaced the pending timer: one timer at most.
+    expect(jest.getTimerCount()).toBe(1);
   });
 
   it('a timer that fires during a refresh() waits for it', async () => {

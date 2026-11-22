@@ -62,5 +62,7 @@ describe('CatalogSnapshot', () => {
     expect(Object.isFrozen(built.muscleGroupsFor('dip'))).toBe(true);
     expect(Object.isFrozen(built.knownMuscleGroups())).toBe(true);
     expect(Object.isFrozen(built.list())).toBe(true);
+    expect(Object.isFrozen(built.list()[0])).toBe(true);
+    expect(Object.isFrozen(built.keysForMuscleGroup('chest'))).toBe(true);
   });
 });
