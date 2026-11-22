@@ -8,6 +8,15 @@ describe('decimal', () => {
   it('displays 102.05828325 as 102.06', () =>
     expect(display(new D('102.05828325'))).toBe(102.06));
 
+  it('displays 103.3333… as 103.33 (rounds down below half)', () =>
+    expect(display(new D(100).times(31).div(30))).toBe(103.33));
+
+  it('displays -0.000763 as 0, never -0', () =>
+    expect(Object.is(display(new D('-0.000763')), 0)).toBe(true));
+
+  it('displays -100.125 as -100.13 (keeps the sign)', () =>
+    expect(display(new D('-100.125'))).toBe(-100.13));
+
   it.each([
     [100.125, 3],
     [10.1234, 4],

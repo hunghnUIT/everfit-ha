@@ -25,8 +25,10 @@ export class UnitRegistry {
     }
   }
 
-  // Trims and lower-cases, then matches the code or an alias.
+  // Trims and lower-cases, then matches the code or an alias. Raw JSON or a
+  // repeated query parameter can bring a non-string at run time: null.
   resolve(input: string): UnitCode | null {
+    if (typeof input !== 'string') return null;
     return this.bySpelling.get(input.trim().toLowerCase()) ?? null;
   }
 

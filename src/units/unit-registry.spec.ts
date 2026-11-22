@@ -2,7 +2,7 @@ import fc from 'fast-check';
 import { D, decimalFromNumber } from '../common/decimal';
 import { MAX_WEIGHT, WEIGHT_KG_INTEGER_DIGITS } from '../common/limits';
 import { UnitRegistry } from './unit-registry';
-import { WEIGHT_UNITS } from './weight-units';
+import { WEIGHT_UNITS, WeightUnit } from './weight-units';
 
 describe('UnitRegistry', () => {
   const reg = new UnitRegistry();
@@ -47,24 +47,50 @@ describe('UnitRegistry', () => {
     expect(withStone.describe()).toBe('kg (kgs), lb (lbs), st (stone)');
   });
 
+  // Design §6: a factor has at most 8 decimals, so a weight with 3 has at most
+  // 11 in kilograms, which numeric(17,11) holds.
+  const codesWithFinerFactor = (units: readonly WeightUnit[]) =>
+    units
+      .filter(({ kgPerUnit }) => new D(kgPerUnit).decimalPlaces() > 8)
+      .map(({ code }) => code);
+
   it('has no factor with more than eight decimals', () =>
+    expect(codesWithFinerFactor(WEIGHT_UNITS)).toEqual([]));
+
+  it('flags a factor with twelve decimals (the exact ounce)', () =>
     expect(
-      WEIGHT_UNITS.map(({ code, kgPerUnit }) => [
-        code,
-        new D(kgPerUnit).decimalPlaces(),
+      codesWithFinerFactor([
+        ...WEIGHT_UNITS,
+        {
+          code: 'oz',
+          label: 'Ounce',
+          kgPerUnit: '0.028349523125',
+          aliases: [],
+        },
       ]),
-    ).toEqual([
-      ['kg', 0],
-      ['lb', 8],
-    ]));
+    ).toEqual(['oz']));
 
   it.each(reg.codes())('fits MAX_WEIGHT in %s into numeric(17,11)', (code) => {
-    const kg = reg.toKg(decimalFromNumber(MAX_WEIGHT), code);
-    expect(kg.decimalPlaces()).toBeLessThanOrEqual(11);
-    expect(kg.truncated().toFixed().length).toBeLessThanOrEqual(
+    const integerPart = reg.toKg(decimalFromNumber(MAX_WEIGHT), code);
+    expect(integerPart.truncated().toFixed().length).toBeLessThanOrEqual(
       WEIGHT_KG_INTEGER_DIGITS,
     );
+    // The finest accepted weight below the cap: 9999.999.
+    const finest = reg.toKg(new D(MAX_WEIGHT).minus('0.001'), code);
+    expect(finest.decimalPlaces()).toBeLessThanOrEqual(11);
   });
+
+  it('converts 100.125 kg to exactly 100.125 kg', () =>
+    expect(reg.toKg(decimalFromNumber(100.125), 'kg').toString()).toBe(
+      '100.125',
+    ));
+
+  it.each([5, null, undefined, ['kg', 'lb'], {}])(
+    'resolves the non-string %p to null without throwing',
+    // A cast: this tests the run-time guard for raw JSON or a repeated query
+    // parameter, which the declared type cannot describe.
+    (input) => expect(reg.resolve(input as unknown as string)).toBeNull(),
+  );
 
   it('lists the codes kg and lb', () =>
     expect(reg.codes()).toEqual(['kg', 'lb']));

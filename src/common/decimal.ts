@@ -16,7 +16,9 @@ export function decimalPlaces(n: number): number {
   return decimalFromNumber(n).decimalPlaces();
 }
 
-// The one place a Decimal becomes a number: half-up to 2 decimals.
+// The one place a Decimal becomes a number: half-up to 2 decimals. A negative
+// value that rounds to zero comes back as 0, not -0.
 export function display(d: Decimal): number {
-  return d.toDecimalPlaces(2, D.ROUND_HALF_UP).toNumber();
+  const rounded = d.toDecimalPlaces(2, D.ROUND_HALF_UP).toNumber();
+  return rounded === 0 ? 0 : rounded;
 }
