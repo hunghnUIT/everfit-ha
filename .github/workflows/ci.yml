@@ -9,6 +9,7 @@ jobs:
   check:
     # ubuntu-latest has Docker, which Testcontainers needs.
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -21,3 +22,13 @@ jobs:
       - run: npm run build
       - run: npm test
       - run: npm run test:int
+
+  clean-image:
+    # docker compose up from nothing: the runtime image starts, migrates and
+    # answers ready with no .env and no development dependency (§12, §13).
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - run: bash scripts/clean-image-check.sh
