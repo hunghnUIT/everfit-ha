@@ -737,3 +737,19 @@ official documentation, and everything not checked was labelled as such
 - Every suggestion declined, with the reason.
 - Each debate objection: accepted or rejected, and why.
 - Prompts or rules-file entries that measurably improved output.
+
+### Implementation log
+
+One entry per real event, in the form
+`Task N · tool and model · what was wrong or suggested · how it was noticed · what was done · commit <short hash>`.
+Entries are only added, never edited.
+
+- Task 0 · Claude Code, Claude Fable (controller) · the plan has the task's implementer run `git init`; the controller ran `git init -b main` itself · noticed when the method's brief script refused to run outside a repository · the implementer did the rest of the task · commit 9ba66c7
+- Task 0 · Claude Code, Claude Fable (controller) · `CLAUDE.md` §2 says a subagent does not edit `ESTIMATE.md`, yet Task 0 has one create it · noticed reading the rules against the task before writing the brief · ruled that creating the file is the task's brief and that the rule guards the estimate once stated; the brief said so · commit 9ba66c7
+- Task 0 · Claude Code, Claude Fable (controller) · the plan tells an implementer to "record it in the AI log" (Global Constraints; Tasks 1, 2 and 10a), while `CLAUDE.md` §4 lets only the controller write this log · noticed in the scan of the plan before Task 1 · ruled that the implementer writes the event in its task report and the controller writes the entry here · commit 9ba66c7
+- Task 0 · Claude Code, Claude Fable (controller) · the method's review-package script needs a base commit, and a root commit has none · the script's own checks, read before running it · built the package by hand: the commit list, the file list and the two new files in full · commit 9ba66c7
+- Task 0 · Claude Code, Claude Opus (implementer) · kept §16's sentence that planning and the debate are outside the figure, which the task's list does not name · reported by the implementer, then listed as Minor by the first reviewer (Claude Fable) · kept: it is the design's own sentence and says what the range covers · commit 9ba66c7
+- Task 0 · Claude Code, Claude Opus (implementer) · added a `Co-Authored-By` trailer that the task's commit command does not have · reported by the implementer, then listed as Minor by the first reviewer · kept: the subject is exact and the trailer says openly which model wrote the commit · commit 9ba66c7
+- Task 0 · Claude Code, Claude Fable (first reviewer) · `ESTIMATE.md` had no evidence tag, and its first sentence read as if the cut list were another file · raised as two Minor findings in the task review · a change to the estimate is the owner's, so the controller put both to the owner, who chose to apply them; no figure changed · commit 3b0d6ed
+- Task 0 · the owner, at the checkpoint · the first commit carried the placeholder author `you@example.com` from the machine's global git settings · noticed by the controller, which checked the author before the first push · the owner chose the GitHub no-reply address for this repository; the one commit, not yet pushed, was re-authored, so its hash changed · commit 9ba66c7
+- Task 0 · the owner, at the checkpoint · the GitHub repository was public, while `CLAUDE.md` §3 says the owner creates a private one · noticed by the controller with `gh repo view` before the first push, so nothing was pushed · the owner chose to push to the public repository · commit 9ba66c7
