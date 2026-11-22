@@ -6,6 +6,11 @@ import once from 'lodash/once';
 import { encodeCursor } from '../src/common/cursor';
 import { readSeedFile, DEFAULT_SEED_PATH } from '../src/exercises/catalog-seed';
 import { CatalogSnapshot } from '../src/exercises/catalog-snapshot';
+import { RecordsQueryDto } from '../src/personal-records/dto/records-query.dto';
+import {
+  buildRecordsQuery,
+  readRecordsQuery,
+} from '../src/personal-records/records-query';
 import { SHARED_UNIT_REGISTRY } from '../src/units/unit-registry';
 import { HistoryQueryDto } from '../src/workouts/dto/history-query.dto';
 import {
@@ -55,6 +60,37 @@ function historyCase(
   };
 }
 
+// The same for a records request: readRecordsQuery as the API reads it,
+// then buildRecordsQuery, the statement findRecords runs.
+function recordsCase(
+  name: string,
+  params: (ctx: BenchContext) => Record<string, string>,
+  budgetP95Ms?: number,
+): BenchCase {
+  return {
+    name,
+    path: (ctx) =>
+      `/v1/users/${HEAVY_USER}/personal-records?${new URLSearchParams(params(ctx)).toString()}`,
+    sql: (ctx) => {
+      const result = readRecordsQuery(
+        plainToInstance(RecordsQueryDto, params(ctx)),
+        SHARED_UNIT_REGISTRY,
+      );
+      if (!result.ok) throw new Error(JSON.stringify(result.errors));
+      return buildRecordsQuery(HEAVY_USER, result.value.key, result.value);
+    },
+    budgetP95Ms,
+  };
+}
+
+// The last year of the heavy user's data, which ends at BENCH_ANCHOR.
+const LAST_YEAR = {
+  from: Temporal.Instant.from(BENCH_ANCHOR)
+    .subtract({ hours: 365 * 24 })
+    .toString(),
+  to: BENCH_ANCHOR,
+};
+
 // A deep page: a cursor about halfway back through the heavy user's 22 years
 // (bench-data's span), with the largest UUID, so every entry at that instant
 // is still to come and the scan starts in the middle of the index.
@@ -87,5 +123,15 @@ export const BENCH_CASES: BenchCase[] = [
     'history: rare exercise by muscle group',
     (ctx) => ({ muscleGroup: ctx.rareGroup }),
     100,
+  ),
+  recordsCase(
+    'PRs: most-trained exercise, all-time',
+    (ctx) => ({ exercise: ctx.topKey }),
+    50,
+  ),
+  recordsCase(
+    'PRs: most-trained exercise, last year',
+    (ctx) => ({ exercise: ctx.topKey, ...LAST_YEAR }),
+    50,
   ),
 ];
