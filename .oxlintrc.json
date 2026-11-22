@@ -2,7 +2,18 @@
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "rules": {
     "typescript/no-explicit-any": "off",
-    "typescript/no-floating-promises": "error"
+    "typescript/no-floating-promises": "error",
+    "no-restricted-imports": [
+      "error",
+      {
+        "paths": [
+          {
+            "name": "lodash",
+            "message": "Import the function from its own path: import get from 'lodash/get'."
+          }
+        ]
+      }
+    ]
   },
   "env": {
     "node": true

@@ -1,4 +1,5 @@
 import { INestApplication, Type } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { AppModule } from '../../src/app.module';
 import { APP_OPTIONS, configureApp } from '../../src/app.setup';
@@ -22,7 +23,8 @@ export async function createTestApp(
     builder.overrideProvider(provide).useValue(useValue);
   }
   const moduleRef = await builder.compile();
-  const app = moduleRef.createNestApplication(APP_OPTIONS);
+  const app =
+    moduleRef.createNestApplication<NestExpressApplication>(APP_OPTIONS);
   // Recorded before init, so an app whose init fails is still closed.
   apps.push(app);
   configureApp(app);

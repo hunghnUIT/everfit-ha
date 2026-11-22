@@ -1,6 +1,8 @@
 import { Inject, Module, OnModuleDestroy } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { TerminusModule } from '@nestjs/terminus';
 import { Pool } from 'pg';
+import { ApiEnv } from '../config/env';
 import { HealthController } from './health.controller';
 
 // A pool of its own until the database module exists (Task 3 swaps it).
@@ -10,8 +12,11 @@ import { HealthController } from './health.controller';
   providers: [
     {
       provide: Pool,
-      useFactory: () =>
-        new Pool({ connectionString: process.env.DATABASE_URL }),
+      inject: [ConfigService],
+      useFactory: (config: ConfigService<ApiEnv, true>) =>
+        new Pool({
+          connectionString: config.get('DATABASE_URL', { infer: true }),
+        }),
     },
   ],
 })
