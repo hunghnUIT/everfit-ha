@@ -6,6 +6,7 @@ import { pgArray } from '../database/sql';
 import { DB, type Database, type Executor } from '../database/tokens';
 import { UNIT_REGISTRY, UnitRegistry } from '../units/unit-registry';
 import { NewEntry, NewSet } from './entry-input';
+import { buildHistoryIdsQuery, HistoryQuery } from './history-query';
 
 // An entry as the repository reads it back: the weights are the database's
 // exact decimal strings, and createdAt is the database's default.
@@ -108,6 +109,26 @@ export class WorkoutsRepository {
         ? []
         : [this.toStoredEntry(entry, setsById[id] ?? [])];
     });
+  }
+
+  // One page of history, in two steps on purpose (design §9.2): the ids,
+  // index-only, with one look-ahead row that says whether there is more,
+  // then the full rows and their sets by primary key. A muscle group that no
+  // exercise has matches nothing, so it costs no query. Step 1 filters by
+  // user, so findEntriesByIds gets only this user's ids.
+  async findHistoryPage(
+    q: HistoryQuery,
+    db: Executor = this.db,
+  ): Promise<{ entries: StoredEntry[]; hasMore: boolean }> {
+    if (q.keys !== undefined && q.keys.length === 0) {
+      return { entries: [], hasMore: false };
+    }
+    const { rows } = await db.execute<{ id: string }>(buildHistoryIdsQuery(q));
+    const ids = rows.slice(0, q.limit).map((row) => row.id);
+    return {
+      entries: await this.findEntriesByIds(ids, db),
+      hasMore: rows.length > q.limit,
+    };
   }
 
   // `sets` are the entry's rows in set_number order.
