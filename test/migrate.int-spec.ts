@@ -6,7 +6,7 @@ import { runMigrateStep } from '../src/database/migrator';
 import { createEmptyDatabase, query } from './support/database';
 
 // The project keeps real dates out of files; Drizzle reads `when` only for order.
-const JOURNAL_WHEN_BELOW = 1767225600000; // 2026-01-01T00:00:00Z
+const JOURNAL_WHEN_BELOW = 1767225600000; // the first millisecond after 2025, in UTC
 
 const JOURNAL = join(
   __dirname,
