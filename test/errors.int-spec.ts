@@ -195,6 +195,54 @@ describe('errors', () => {
     expect(res.body.requestId).toBe('client-request-42');
   });
 
+  it('a form-encoded body → 415 UNSUPPORTED_MEDIA_TYPE, detail "Send Content-Type: application/json"', async () => {
+    // What curl -d sends without a -H (design §9.6).
+    const res = await http()
+      .post('/v1/probe')
+      .type('form')
+      .set('x-request-id', 'client-request-45')
+      .send('n=1')
+      .expect(415);
+    expect(res.headers['content-type']).toMatch(PROBLEM_JSON);
+    expectHelmet(res);
+    expect(res.body).toMatchObject({
+      type: 'https://errors.workout-api.local/unsupported-media-type',
+      status: 415,
+      code: 'UNSUPPORTED_MEDIA_TYPE',
+      detail: 'Send Content-Type: application/json',
+      instance: '/v1/probe',
+      requestId: 'client-request-45',
+    });
+    expect(logs).toEqual([
+      {
+        level: 'log',
+        fields: {
+          method: 'POST',
+          path: '/v1/probe',
+          status: 415,
+          requestId: 'client-request-45',
+        },
+      },
+    ]);
+  });
+
+  it('Content-Type application/json; charset=utf-8 → accepted', async () => {
+    const res = await http()
+      .post('/v1/probe')
+      .set('Content-Type', 'application/json; charset=utf-8')
+      .send('{"n":1}')
+      .expect(200);
+    expect(res.body).toEqual({ n: 1 });
+  });
+
+  it('a POST with the JSON header and no body passes on to validation', async () => {
+    const res = await http()
+      .post('/v1/probe')
+      .set('Content-Type', 'application/json')
+      .expect(400);
+    expect(res.body.code).toBe('VALIDATION_ERROR');
+  });
+
   it('gives a body-parser failure the request id it echoes', async () => {
     const res = await http()
       .post('/v1/probe')
