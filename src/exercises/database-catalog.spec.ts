@@ -123,6 +123,26 @@ describe('DatabaseExerciseCatalog', () => {
     expect(catalog.snapshot().hasMuscleGroup('neck')).toBe(true);
   });
 
+  it('an error that escapes a load does not stop the loads queued after it', async () => {
+    const { load, warn, catalog } = setup();
+    load
+      .mockResolvedValueOnce(rows('chest'))
+      .mockRejectedValueOnce(dbDown())
+      .mockResolvedValueOnce(rows('chest', 'neck'));
+    // The one path out of the load's own catch: the warning itself throws.
+    warn.mockImplementationOnce(() => {
+      throw new Error('logger failed');
+    });
+    await catalog.onModuleInit();
+
+    await expect(catalog.refresh()).rejects.toThrow('logger failed');
+    expect(catalog.snapshot().loadNumber).toBe(1);
+
+    await catalog.refresh();
+    expect(load).toHaveBeenCalledTimes(3);
+    expect(catalog.snapshot().hasMuscleGroup('neck')).toBe(true);
+  });
+
   it('a refresh asked for during a load runs after it', async () => {
     const { load, catalog } = setup();
     const slow = deferred();
