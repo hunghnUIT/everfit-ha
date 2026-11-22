@@ -42,7 +42,7 @@ import { entryNotFound, WorkoutsService } from './workouts.service';
   description: 'An opaque id: 1 to 64 characters of A-Z a-z 0-9 _ . -.',
   example: 'u_123',
 })
-@Controller('users/:userId/workout-entries')
+@Controller('v1/users/:userId/workout-entries')
 export class WorkoutsController {
   constructor(private readonly service: WorkoutsService) {}
 

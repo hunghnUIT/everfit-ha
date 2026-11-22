@@ -23,7 +23,7 @@ function toBody(row: CatalogExerciseRow) {
 // The public catalog routes (design §10.4). They read the tables, not the
 // snapshot, and take no query parameters.
 @ApiTags('catalog')
-@Controller()
+@Controller('v1')
 export class ExercisesController {
   constructor(private readonly repository: CatalogRepository) {}
 

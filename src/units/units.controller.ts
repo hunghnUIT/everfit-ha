@@ -4,7 +4,7 @@ import { UnitsEnvelopeDto } from './dto/unit-response.dto';
 import { UNIT_REGISTRY, UnitRegistry } from './unit-registry';
 
 @ApiTags('units')
-@Controller('units')
+@Controller('v1/units')
 export class UnitsController {
   constructor(@Inject(UNIT_REGISTRY) private readonly registry: UnitRegistry) {}
 

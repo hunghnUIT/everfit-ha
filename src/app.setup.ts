@@ -20,9 +20,10 @@ export const APP_OPTIONS: NestApplicationOptions = {
 // Every global setting lives here, so main.ts and the tests build the same app.
 export function configureApp(app: NestExpressApplication): void {
   app.useLogger(app.get(Logger));
-  app.setGlobalPrefix('v1', {
-    exclude: ['health/live', 'health/ready', 'docs', 'docs-json'],
-  });
+  // No global prefix: each controller names /v1 in its own path. With a
+  // global prefix Nest mounts its not-found handler under the prefix and the
+  // excluded paths only, so GET / would get Express's HTML 404 instead of
+  // problem details (§9.6).
   // Before the body parser, so a request it refuses still gets the headers.
   // Compose serves plain HTTP, so the Swagger UI must not be upgraded to HTTPS.
   app.use(
