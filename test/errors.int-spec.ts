@@ -1,5 +1,6 @@
 import { INestApplication, Logger } from '@nestjs/common';
 import get from 'lodash/get';
+import type { ClientRequest } from 'node:http';
 import request from 'supertest';
 import { createTestApp } from './support/app';
 import { ProbeController } from './support/probe.controller';
@@ -25,6 +26,10 @@ function recordFilterLogs(): LogCall[] {
   }
   return calls;
 }
+
+// A header of the request as it was sent; supertest's types omit res.req.
+const sentHeader = (res: request.Response, name: string) =>
+  (res as unknown as { req: ClientRequest }).req.getHeader(name);
 
 // One header helmet sets, and the one it removes.
 function expectHelmet(res: request.Response) {
@@ -107,6 +112,20 @@ describe('errors', () => {
     expect(res.body.errors).toEqual([
       { path: 'n', message: expect.any(String) },
     ]);
+  });
+
+  it('a validation error carries no part of the validated object (its target)', async () => {
+    // The global pipe keeps each error's target for toFieldErrors; only the
+    // path and message of an error may leave.
+    const res = await http()
+      .post('/v1/probe')
+      .send({ n: 'x', note: 'target-marker' })
+      .expect(400);
+    expect(res.body.errors).toEqual([
+      { path: 'n', message: expect.any(String) },
+    ]);
+    expect(res.text).not.toContain('target-marker');
+    expect(JSON.stringify(logs)).not.toContain('target-marker');
   });
 
   it('an unknown body property → 400 VALIDATION_ERROR naming it', async () => {
@@ -193,6 +212,96 @@ describe('errors', () => {
       .expect(404);
     expect(res.headers['x-request-id']).toBe('client-request-42');
     expect(res.body.requestId).toBe('client-request-42');
+  });
+
+  it('a form-encoded body → 415 UNSUPPORTED_MEDIA_TYPE, detail "Send Content-Type: application/json"', async () => {
+    // What curl -d sends without a -H (design §9.6).
+    const res = await http()
+      .post('/v1/probe')
+      .type('form')
+      .set('x-request-id', 'client-request-45')
+      .send('n=1')
+      .expect(415);
+    expect(res.headers['content-type']).toMatch(PROBLEM_JSON);
+    expectHelmet(res);
+    expect(res.body).toMatchObject({
+      type: 'https://errors.workout-api.local/unsupported-media-type',
+      status: 415,
+      code: 'UNSUPPORTED_MEDIA_TYPE',
+      detail: 'Send Content-Type: application/json',
+      instance: '/v1/probe',
+      requestId: 'client-request-45',
+    });
+    expect(logs).toEqual([
+      {
+        level: 'log',
+        fields: {
+          method: 'POST',
+          path: '/v1/probe',
+          status: 415,
+          requestId: 'client-request-45',
+        },
+      },
+    ]);
+  });
+
+  it.each(['put', 'patch'] as const)(
+    '%s: a form body → 415, a JSON body → accepted',
+    async (method) => {
+      const form = await http()[method]('/v1/probe').type('form').send('n=1');
+      expect(form.status).toBe(415);
+      expect(form.body.detail).toBe('Send Content-Type: application/json');
+      const json = await http()[method]('/v1/probe').send({ n: 1 });
+      expect(json.status).toBe(200);
+      expect(json.body).toEqual({ n: 1 });
+    },
+  );
+
+  it('Content-Type application/json; charset=utf-8 → accepted', async () => {
+    const res = await http()
+      .post('/v1/probe')
+      .set('Content-Type', 'application/json; charset=utf-8')
+      .send('{"n":1}')
+      .expect(200);
+    expect(res.body).toEqual({ n: 1 });
+  });
+
+  // supertest, like Postman and Node clients, sends Content-Length: 0 for a
+  // POST with no body; type-is would count that as a body.
+  it('an empty POST with no Content-Type passes on to validation', async () => {
+    const res = await http().post('/v1/probe').expect(400);
+    expect(sentHeader(res, 'content-type')).toBeUndefined();
+    expect(res.body.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('an empty POST with a form Content-Type and Content-Length: 0 passes on to validation', async () => {
+    const res = await http()
+      .post('/v1/probe')
+      .set('Content-Type', 'application/x-www-form-urlencoded')
+      .set('Content-Length', '0')
+      .expect(400);
+    expect(res.body.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('a body with no Content-Type header → 415', async () => {
+    // A Buffer is sent as it is: superagent adds no Content-Type for it.
+    const res = await http()
+      .post('/v1/probe')
+      .send(Buffer.from('{"n":1}'))
+      .expect(415);
+    expect(sentHeader(res, 'content-type')).toBeUndefined();
+    expect(res.body).toMatchObject({
+      code: 'UNSUPPORTED_MEDIA_TYPE',
+      detail: 'Send Content-Type: application/json',
+    });
+  });
+
+  it('a POST with the JSON header and no body passes on to validation', async () => {
+    const res = await http()
+      .post('/v1/probe')
+      .set('Content-Type', 'application/json')
+      .expect(400);
+    expect(res.body.code).toBe('VALIDATION_ERROR');
   });
 
   it('gives a body-parser failure the request id it echoes', async () => {

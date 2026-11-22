@@ -87,6 +87,13 @@ describe('toApiProblem', () => {
     });
   });
 
+  it('a 415 with no message of its own → the one spelling of the 415 detail', () =>
+    expect(toApiProblem(new HttpException({}, 415))).toMatchObject({
+      status: 415,
+      code: 'UNSUPPORTED_MEDIA_TYPE',
+      detail: 'Send Content-Type: application/json',
+    }));
+
   it('a BadRequestException → 400 VALIDATION_ERROR', () =>
     expect(toApiProblem(new BadRequestException('Bad id'))).toMatchObject({
       status: 400,

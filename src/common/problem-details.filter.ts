@@ -8,6 +8,7 @@ import {
 import type { Request, Response } from 'express';
 import get from 'lodash/get';
 import kebabCase from 'lodash/kebabCase';
+import { JSON_ONLY_DETAIL } from './json-only.middleware';
 import { BODY_LIMIT } from './limits';
 import { requestIdOf } from './logger';
 import { ApiProblem, driverErrorCode, ProblemCode } from './problem';
@@ -46,7 +47,7 @@ const DETAILS: Record<ProblemCode, string> = {
   MUSCLE_GROUP_EXISTS: 'The muscle group already exists.',
   MUSCLE_GROUP_IN_USE: 'An exercise still lists the muscle group.',
   PAYLOAD_TOO_LARGE: `The request body is over the ${BODY_LIMIT} limit.`,
-  UNSUPPORTED_MEDIA_TYPE: 'Send Content-Type: application/json.',
+  UNSUPPORTED_MEDIA_TYPE: JSON_ONLY_DETAIL,
   INTERNAL_ERROR:
     'An unexpected error occurred. Quote the requestId when reporting it.',
   SERVICE_UNAVAILABLE: 'The database is unreachable. Try again shortly.',
