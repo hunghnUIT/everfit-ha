@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { Client, escapeIdentifier, QueryResultRow } from 'pg';
+import { Client, escapeIdentifier, Pool, QueryResultRow } from 'pg';
+import {
+  DEFAULT_SEED_PATH,
+  readSeedFile,
+  runSeed,
+} from '../../src/exercises/catalog-seed';
 
 // A short-lived connection to the shared test database, or to another one.
 async function withClient<T>(
@@ -15,11 +20,25 @@ async function withClient<T>(
   }
 }
 
-// Every integration file starts on empty workout tables (setup-int.ts).
+// Every integration file starts on empty workout tables and the catalog as
+// the real seed file gives it (setup-int.ts). runSeed takes a PoolClient.
 export async function resetDatabase(): Promise<void> {
-  await withClient((client) =>
-    client.query('TRUNCATE workout_sets, workout_entries'),
-  );
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query(
+        `TRUNCATE workout_sets, workout_entries,
+                  exercise_muscle_groups, exercises, muscle_groups,
+                  catalog_seed_ledger`,
+      );
+      await runSeed(client, readSeedFile(DEFAULT_SEED_PATH), () => {});
+    } finally {
+      client.release();
+    }
+  } finally {
+    await pool.end();
+  }
 }
 
 // A new database on the test container, with nothing in it, for a test that

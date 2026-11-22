@@ -26,6 +26,9 @@ ENV NODE_ENV=production
 COPY package.json ./
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+# The catalog seed lies outside src/, so the build does not carry it; the
+# migrate step reads it from dist/exercises/../../seed (design §10.3, §14).
+COPY seed ./seed
 USER node
 EXPOSE 3000
 HEALTHCHECK CMD node -e "fetch('http://127.0.0.1:3000/health/live').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"

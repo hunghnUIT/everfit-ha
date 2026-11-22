@@ -3,6 +3,7 @@ import { driverErrorCode } from '../common/problem';
 import { ConfigError, validateMigrateEnv } from '../config/env';
 import { describeDatabaseUrl } from '../database/describe-url';
 import { runMigrateStep } from '../database/migrator';
+import { SeedFileError } from '../exercises/catalog-seed';
 
 // `node dist/cli/migrate.js`: the one-shot step compose runs before api. A
 // plain entry point outside Nest, reading only the variables it uses (§13).
@@ -16,10 +17,11 @@ export async function main(): Promise<void> {
     await runMigrateStep(env);
     logger.info({ database }, 'Migrate step finished');
   } catch (error) {
-    // One line. A ConfigError names the variables and never their values; any
+    // One line. A ConfigError names the variables and never their values; a
+    // SeedFileError names the file and every item path with its message; any
     // other error gives its code only, since a driver's message may carry the
     // host or the URL.
-    if (error instanceof ConfigError) {
+    if (error instanceof ConfigError || error instanceof SeedFileError) {
       logger.fatal(error.message);
     } else {
       logger.fatal({ code: driverErrorCode(error) }, 'Migrate step failed');
