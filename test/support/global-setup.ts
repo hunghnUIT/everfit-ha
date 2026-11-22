@@ -17,5 +17,7 @@ export default async function globalSetup(): Promise<void> {
     .withCommand(['postgres', '-c', 'timezone=America/Los_Angeles'])
     .start();
   process.env.DATABASE_URL = container.getConnectionUri();
+  // Keeps request lines and the logged 500s out of the test output.
+  process.env.LOG_LEVEL = 'fatal';
   (globalThis as ContainerHolder).postgresContainer = container;
 }
