@@ -13,6 +13,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { CatalogService } from './catalog.service';
 import { ExerciseWriteDto } from './dto/exercise-write.dto';
+import { MuscleGroupWriteDto } from './dto/muscle-group-write.dto';
 
 // Every operation says the routes are open (design §10.7, item 3).
 const OPEN =
@@ -69,5 +70,25 @@ export class CatalogAdminController {
   })
   async deleteExercise(@Param('exerciseKey') exerciseKey: string) {
     await this.service.deleteExercise(exerciseKey);
+  }
+
+  @Post('muscle-groups')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Add a muscle group to the closed list',
+    description: OPEN,
+  })
+  async createMuscleGroup(@Body() body: MuscleGroupWriteDto) {
+    return { data: await this.service.createMuscleGroup(body) };
+  }
+
+  @Delete('muscle-groups/:name')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Remove a muscle group that no exercise lists',
+    description: OPEN,
+  })
+  async deleteMuscleGroup(@Param('name') name: string) {
+    await this.service.deleteMuscleGroup(name);
   }
 }
