@@ -5,9 +5,9 @@ everything that changed the design, the public API, the scope or the estimate. T
 how they were prompted, and shows real cases where AI output was wrong, where a suggestion was rejected, and where
 the review caught what the tests did not.
 
-**Every example below is a real event, written into a log when it happened** (`planning/06-ai-workflow-seed.md`: the
-planning and debate entries, then "Implementation log", one line per event, appended and never edited). Nothing was
-reconstructed afterwards. Commit hashes name the commit where the event was fixed or settled; `git log` shows each
+**Every example below is a real event, written into a log** (`planning/06-ai-workflow-seed.md`: the
+planning and debate entries, then "Implementation log", one line per event, appended and never edited). Most entries were written when the event happened; the final review found events the log
+lacked, and those were added at its end from the ledger and the task reports, each marked as added then (section 3, item 19). Nothing was invented. Commit hashes name the commit where the event was fixed or settled; `git log` shows each
 one. IDs such as W-2 and R-5 are the log's own. Evidence tags (`[V]` verified, `[J]` judgment) are those of
 `planning/05-research-notes.md`.
 
@@ -184,8 +184,8 @@ Implementation (the log's entries, with the commit):
    false` (the Nest template's setting, which DTO classes need; Task 1); the pool closing before the HTTP server so a request in flight at shutdown could get a
    500 (only a request in the milliseconds of a shutdown; Task 3); two inputs that pass validation but fail in the database, a cursor far below PostgreSQL's range
    and a name with U+0000 (only a fuzzer sends either; Task 7); a body nested 1 200 levels (only a hostile client; Task 10a). The Task 7 rejection did not
-   last: the final review found the same two inputs still answering 500 on more routes, with a year past 9999 in a read bound and a blank search term
-   beside them, and since each is one keystroke and a 500 is the worst answer the API can give, they became a 400 (a 404 on a catalog path) in its fix
+   last: the final review found the same two inputs still answering 500 on more routes, with a year past 9999 in a read bound (another 500) and a blank search term
+   (which answered an unfiltered list) beside them, and since each is one keystroke and a 500 is the worst answer the API can give, they became a 400 (a 404 on a catalog path) in its fix
    round (`d072a6e`). The nested body stays rejected.
 9. **The owner's own corrections of AI process.** Waiting for the owner on every pull request kept stopping the run, so the owner changed the rule (work ahead; Task
    2); the second review was dropped after both routes to it ran out of quota (Task 4); the owner asked for `import get from 'lodash/get'` after reading a pull
@@ -207,11 +207,13 @@ Implementation (the log's entries, with the commit):
   11 and 13 were reported to the owner and the run went on. Throughout, the owner answered the decisions put to them (fixed dates in the migration journal,
   which concurrency the benchmark budgets bind, the `withCatalogWrite` signature, which model does what) and, after Task 4, did not read every diff. During
   Task 14's pull request the owner went to sleep and said no confirmation was needed: Tasks 15 to 18, the final review and its fix round ran overnight,
-  every decision a controller ruling that keeps the design as written, recorded for the owner. So 17 of the 20 task pull requests had an AI review and no
+  every decision a controller ruling recorded for the owner. Each keeps the design as written except one: the fix round gave read bounds an
+  upper limit, year 9999, which design §8 says they do not have, because a later instant answered 500 (section 4.8); that ruling was made without
+  the owner, and the owner's confirmation is open. So 17 of the 20 task pull requests had an AI review and no
   human one. The owner corrected the process more than once (sections 2 and 4.9). The first commit carried a placeholder author address from the machine's
   git settings; the controller noticed before the first push and the owner chose a different address (Task 0).
-- **`CLAUDE.md` is the rules file as written before the build.** It was not rewritten during the run, and the owner changed these rules as it went, each
-  change in the log under its task: the repository is public, not private (Task 0); the run did not wait for an approved pull request before the next
+- **`CLAUDE.md` is the rules file as written before the build.** It was not rewritten during the run, and these rules changed as it went, by the owner's
+  instruction or by a recorded ruling of the controller, each change in the log under its task: the repository is public, not private (Task 0); the run did not wait for an approved pull request before the next
   independent task started (Task 2); the second reviewer ran on the first two pull requests and was dropped when both routes to it ran out of quota, so the
   final review also had one reviewer, not two (Tasks 3 and 4); from Task 4 one AI review and green CI merged a pull request, and checkpoints reported instead
   of stopping (Task 4); the table names Fable as controller, Opus as implementer and Fable as first reviewer, while in practice Sonnet took over normal tasks
@@ -224,7 +226,8 @@ Implementation (the log's entries, with the commit):
 
 ## 6. What AI was not trusted with
 
-- Anything that changes the design, the public API, the scope or the estimate: the owner decided, in one batch, before any file was edited.
+- Anything that changes the design, the public API, the scope or the estimate: the owner decided, in one batch, before any file was edited. One
+  exception is in section 5: the year-9999 limit on read bounds, ruled by the controller while the owner was asleep.
 - Facts about how the product is run (W-23): no number of agreeing models settles a fact none of them has.
 - The README's claims about performance: the figures are copied from the benchmark report and the method is printed beside them.
 - The time estimate in `ESTIMATE.md`: it is the owner's and was committed before the first line of code.

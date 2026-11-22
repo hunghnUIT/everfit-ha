@@ -194,7 +194,7 @@ GET {{host}}/v1/users/{{user}}/personal-records/compare?exercise=Bench%20Press&f
 GET {{host}}/v1/users/{{user}}/personal-records/compare?exercise=Bench%20Press&from=2025-02-01T00:00:00Z
 
 ### ---------------------------------------------------------------------
-### Catalog administration: THESE FIVE CALLS ARE OPEN.
+### Catalog administration: THESE CALLS ARE OPEN.
 ### In the version as delivered they are unauthenticated: anyone who can
 ### reach the API can change the catalog. See the README, "Catalog
 ### administration", for the two lines that switch the token guard on. When
