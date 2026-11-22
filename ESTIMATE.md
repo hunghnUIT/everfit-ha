@@ -1,9 +1,9 @@
 # Time estimate
 
-Deliverable D8 asks for the time estimate before coding starts. This file is
-committed together with the cut list before the first line of code. Every
+Deliverable D8 asks for the time estimate before coding starts. This file,
+with the cut list below, is committed before the first line of code. Every
 figure below comes from `planning/02-design.md` §16 and is the candidate's
-judgment.
+judgment [J].
 
 ## Range
 
