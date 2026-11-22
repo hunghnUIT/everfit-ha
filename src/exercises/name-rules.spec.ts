@@ -1,9 +1,10 @@
 import { checkExerciseName, checkMuscleGroupName } from './name-rules';
 
-// U+FDFA, one code point that NFKC turns into 18 (V-21).
-const FDFA = 'ﷺ';
-// İ (U+0130), which lower-cases to two code points: i + U+0307 (V-21).
-const DOTTED_I = 'İ';
+// U+FDFA (ARABIC LIGATURE SALLALLAHOU ALAYHE WASALLAM), one code point
+// that NFKC turns into 18 (V-21).
+const FDFA = '\u{FDFA}';
+// İ (U+0130, capital I with dot above), which lower-cases to two code points: i + U+0307 (V-21).
+const DOTTED_I = '\u{0130}';
 
 describe('checkExerciseName (design §10.1)', () => {
   it('refuses 100 × U+FDFA (a key of 1 800) with the field named', () =>
