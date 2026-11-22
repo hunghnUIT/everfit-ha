@@ -32,8 +32,9 @@ export type RecordsJson = {
 // The weight follows toEntryResponse (Task 10b): in the set's own unit it is
 // the number as sent, so 100.125 stays 100.125; in another unit it is
 // converted from the exact kilograms and rounded half-up to two decimals.
-// `original` always carries the number as sent.
-function readRecord(
+// `original` always carries the number as sent. `kg` is the set's exact
+// kilograms, which compare's deltas are computed from (§9.4).
+export function readRecord(
   row: RecordRow,
   unit: UnitCode,
   units: UnitRegistry,

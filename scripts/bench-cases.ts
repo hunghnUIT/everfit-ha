@@ -6,6 +6,8 @@ import once from 'lodash/once';
 import { encodeCursor } from '../src/common/cursor';
 import { readSeedFile, DEFAULT_SEED_PATH } from '../src/exercises/catalog-seed';
 import { CatalogSnapshot } from '../src/exercises/catalog-snapshot';
+import { readCompareQuery } from '../src/personal-records/compare-query';
+import { CompareQueryDto } from '../src/personal-records/dto/compare-query.dto';
 import { RecordsQueryDto } from '../src/personal-records/dto/records-query.dto';
 import {
   buildRecordsQuery,
@@ -83,6 +85,43 @@ function recordsCase(
   };
 }
 
+// The same for a comparison: readCompareQuery as the API reads it. The API
+// runs buildRecordsQuery once per period in one transaction; a case explains
+// one statement, so it explains the current period's.
+function compareCase(
+  name: string,
+  params: (ctx: BenchContext) => Record<string, string>,
+  budgetP95Ms?: number,
+): BenchCase {
+  return {
+    name,
+    path: (ctx) =>
+      `/v1/users/${HEAVY_USER}/personal-records/compare?${new URLSearchParams(params(ctx)).toString()}`,
+    sql: (ctx) => {
+      const result = readCompareQuery(
+        plainToInstance(CompareQueryDto, params(ctx)),
+        SHARED_UNIT_REGISTRY,
+      );
+      if (!result.ok) throw new Error(JSON.stringify(result.errors));
+      return buildRecordsQuery(
+        HEAVY_USER,
+        result.value.key,
+        result.value.current,
+      );
+    },
+    budgetP95Ms,
+  };
+}
+
+// Two adjacent months near the end of the heavy user's data (it ends at
+// BENCH_ANCHOR): November against October, cut in UTC.
+const ADJACENT_MONTHS = {
+  from: '2025-11-01T00:00:00Z',
+  to: '2025-12-01T00:00:00Z',
+  compareFrom: '2025-10-01T00:00:00Z',
+  compareTo: '2025-11-01T00:00:00Z',
+};
+
 // The last year of the heavy user's data, which ends at BENCH_ANCHOR.
 const LAST_YEAR = {
   from: Temporal.Instant.from(BENCH_ANCHOR)
@@ -132,6 +171,11 @@ export const BENCH_CASES: BenchCase[] = [
   recordsCase(
     'PRs: most-trained exercise, last year',
     (ctx) => ({ exercise: ctx.topKey, ...LAST_YEAR }),
+    50,
+  ),
+  compareCase(
+    'compare: most-trained exercise, two adjacent months',
+    (ctx) => ({ exercise: ctx.topKey, ...ADJACENT_MONTHS }),
     50,
   ),
 ];
