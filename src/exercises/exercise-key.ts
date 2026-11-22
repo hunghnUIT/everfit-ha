@@ -12,6 +12,9 @@ export function collapseWhitespace(s: string): string {
 }
 
 // NFKC, then trim, then collapse inner whitespace, then lower-case.
+// toLowerCase on purpose, never toLocaleLowerCase: a Turkish locale would
+// change stored keys. The result still follows the Unicode data of the Node
+// version that runs it, which is why the golden test exists.
 export function exerciseKey(name: string): string {
   return collapseWhitespace(name.normalize('NFKC').trim()).toLowerCase();
 }

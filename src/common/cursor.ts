@@ -10,8 +10,11 @@ export function encodeCursor(c: { at: Date; id: string }): string {
   return Buffer.from(json, 'utf8').toString('base64url');
 }
 
-// Domain logic: null for anything this codec did not write, so the caller
-// answers 400. It never throws, whatever text it is given.
+// Domain logic: null, which the caller answers with a 400, unless the text
+// decodes to a JSON object of exactly v: 1, an `at` that Temporal.Instant.from
+// reads and an `id` that is a UUID. It is lenient about spelling (padded or
+// standard base64, other JSON layouts, other instant forms, upper-case ids)
+// and never throws, whatever text it is given.
 export function decodeCursor(raw: string): { at: Date; id: string } | null {
   if (typeof raw !== 'string') return null;
   let value: unknown;
