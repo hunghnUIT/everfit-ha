@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The clean-image check (design §12, §13): `docker compose up` from nothing
 # gives a ready api, and the runtime image holds no .env and no development
-# dependency, so the migrate step that just ran used none (§14, slice 3).
+# dependency, so the migrate step that just ran used none (§14, slice 3);
+# and the api serves the seeded catalog (§12, from slice 6).
 # Exits non-zero on any failed step, and removes this project's containers
 # and volume whatever happens.
 set -euo pipefail
@@ -30,16 +31,20 @@ curl -fsS --retry 30 --retry-delay 3 --retry-all-errors --max-time 5 \
   "http://127.0.0.1:${api_port}/health/ready"
 echo
 
-echo "== 3. The image holds no .env"
+echo "== 3. The seeded catalog is served: GET /v1/exercises/bench%20press"
+curl -fsS "http://127.0.0.1:${api_port}/v1/exercises/bench%20press"
+echo
+
+echo "== 4. The image holds no .env"
 docker compose run --rm --no-deps api sh -c 'test ! -e .env'
 
-echo "== 4. The image holds no development dependency"
+echo "== 5. The image holds no development dependency"
 docker compose run --rm --no-deps api sh -c 'test ! -e node_modules/typescript'
 
-echo "== 5. The image holds the catalog seed file"
+echo "== 6. The image holds the catalog seed file"
 docker compose run --rm --no-deps api test -f seed/exercise-catalog.seed.json
 
-echo "== 6. Clean up"
+echo "== 7. Clean up"
 docker compose down -v
 trap - EXIT
 

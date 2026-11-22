@@ -47,3 +47,10 @@ export function driverErrorCode(error: unknown): string | undefined {
   const code: unknown = get(error, 'code') ?? get(error, 'cause.code');
   return typeof code === 'string' ? code : undefined;
 }
+
+// The class name of a caught error, such as 'TypeError', for a log line that
+// must not carry the message (a driver's message can name the host).
+export function errorName(error: unknown): string | undefined {
+  const name: unknown = get(error, 'name');
+  return typeof name === 'string' ? name : undefined;
+}
