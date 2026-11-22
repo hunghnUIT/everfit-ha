@@ -38,19 +38,32 @@ export function readRecordsQuery(
   }
   errors.push(...checkRange(value.from, value.to, 'from', 'to'));
 
-  if (q.unit !== undefined) {
-    const unit = units.resolve(q.unit);
-    if (unit === null) {
-      errors.push({
-        path: 'unit',
-        message: unsupportedUnitMessage(q.unit, units.describe()),
-      });
-    } else {
-      value.unit = unit;
-    }
-  }
+  const unit = readUnit(q.unit, units);
+  if (unit.ok) value.unit = unit.value;
+  else errors.push(...unit.errors);
 
   return errors.length > 0 ? { ok: false, errors } : { ok: true, value };
+}
+
+// The `unit` parameter of the records and compare queries as its canonical
+// code; absent means kg.
+export function readUnit(
+  raw: string | undefined,
+  units: UnitRegistry,
+): Check<UnitCode> {
+  if (raw === undefined) return { ok: true, value: 'kg' };
+  const unit = units.resolve(raw);
+  return unit === null
+    ? {
+        ok: false,
+        errors: [
+          {
+            path: 'unit',
+            message: unsupportedUnitMessage(raw, units.describe()),
+          },
+        ],
+      }
+    : { ok: true, value: unit };
 }
 
 // The statement of design §9.3: the join is evaluated once and materialised,

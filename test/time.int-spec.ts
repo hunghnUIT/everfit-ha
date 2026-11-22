@@ -15,7 +15,7 @@ import {
 // shared NOW, so this file's clock stands later than both workouts.
 const LATER_NOW = '2025-02-11T04:00:00Z';
 
-// §12, the Time row. Compare joins these tests in Task 15.
+// §12, the Time row: history, PRs and compare.
 describe('time (design §8)', () => {
   let app: INestApplication;
   const http = () => request(app.getHttpServer());
@@ -65,6 +65,32 @@ describe('time (design §8)', () => {
         res.body.data.records as Record<string, { entryId: string } | null>,
       ).flatMap((r) => (r === null ? [] : [r.entryId])),
     );
+  }
+
+  // The entry ids the records of each period of one comparison name: the
+  // current period [from, to) and the comparison period [compareFrom,
+  // compareTo), each bound sent percent-encoded.
+  async function comparedIds(
+    userId: string,
+    current: [string, string],
+    previous: [string, string],
+  ): Promise<{ current: Set<string>; previous: Set<string> }> {
+    const [from, to, compareFrom, compareTo] = [...current, ...previous].map(
+      encodeURIComponent,
+    );
+    const qs = `?exercise=Bench%20Press&from=${from}&to=${to}&compareFrom=${compareFrom}&compareTo=${compareTo}`;
+    const res = withStatus(
+      await http().get(`/v1/users/${userId}/personal-records/compare${qs}`),
+      200,
+    );
+    const ids = (records: Record<string, { entryId: string } | null>) =>
+      new Set(
+        Object.values(records).flatMap((r) => (r === null ? [] : [r.entryId])),
+      );
+    return {
+      current: ids(res.body.data.current.records),
+      previous: ids(res.body.data.previous.records),
+    };
   }
 
   beforeAll(async () => {
@@ -179,6 +205,32 @@ describe('time (design §8)', () => {
     expect(second).toEqual(new Set([atB, beforeC]));
     for (const outside of [beforeA, atC]) {
       expect([...first, ...second]).not.toContain(outside);
+    }
+  });
+
+  it('the four boundary entries each appear in exactly one period (compare)', async () => {
+    const userId = uniqueUserId();
+    const a = '2025-02-01T00:00:00.000Z';
+    const b = '2025-02-02T00:00:00.000Z';
+    const c = '2025-02-03T00:00:00.000Z';
+    // The same entries as the PRs test: in each period the entry at its from
+    // holds the heaviest set and the one a millisecond before its to the
+    // highest volume; the two outside would win every record if let in.
+    const at = async (date: string, weight: number, reps: number) =>
+      (await log(userId, date, [{ reps, weight, unit: 'kg' }])).id;
+    const beforeA = await at('2025-01-31T23:59:59.999Z', 150, 10);
+    const atA = await at(a, 120, 1);
+    const beforeB = await at('2025-02-01T23:59:59.999Z', 80, 10);
+    const atB = await at(b, 120, 1);
+    const beforeC = await at('2025-02-02T23:59:59.999Z', 80, 10);
+    const atC = await at(c, 150, 10);
+
+    // The later period is the current one, the earlier the comparison.
+    const { current, previous } = await comparedIds(userId, [b, c], [a, b]);
+    expect(previous).toEqual(new Set([atA, beforeB]));
+    expect(current).toEqual(new Set([atB, beforeC]));
+    for (const outside of [beforeA, atC]) {
+      expect([...current, ...previous]).not.toContain(outside);
     }
   });
 
