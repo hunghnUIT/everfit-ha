@@ -12,6 +12,16 @@ import { readEntryInputs } from './entry-input';
 import { EntryResponse, toEntryResponse } from './entry-response';
 import { WorkoutsRepository } from './workouts.repository';
 
+// The one 404 for an entry: an id that is not a UUID gets it too (the
+// controller's ParseUUIDPipe), so both answers are the same.
+export function entryNotFound(): ApiProblem {
+  return new ApiProblem(
+    404,
+    'NOT_FOUND',
+    'This user has no workout entry with that id.',
+  );
+}
+
 // Orchestration only. Each request reads the clock once and takes one catalog
 // snapshot, which every lookup of its response uses (design §8, §10.2).
 @Injectable()
@@ -58,11 +68,7 @@ export class WorkoutsService {
     }
     const stored = await this.repository.findEntry(userId, id);
     if (stored === null) {
-      throw new ApiProblem(
-        404,
-        'NOT_FOUND',
-        `User '${userId}' has no workout entry with the id '${id}'.`,
-      );
+      throw entryNotFound();
     }
     return toEntryResponse(stored, code, snapshot, this.units);
   }

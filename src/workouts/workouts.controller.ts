@@ -16,7 +16,7 @@ import { UserIdPipe } from '../common/user-id.pipe';
 import { SHARED_UNIT_REGISTRY } from '../units/unit-registry';
 import { EntryInputDto } from './dto/entry-input.dto';
 import { EntryQueryDto } from './dto/entry-query.dto';
-import { WorkoutsService } from './workouts.service';
+import { entryNotFound, WorkoutsService } from './workouts.service';
 
 // HTTP only (design §9.1). The body is taken as unknown, so the global
 // ValidationPipe leaves it to readEntryInputs, which words an array or an
@@ -44,16 +44,14 @@ export class WorkoutsController {
   @ApiOperation({ summary: 'One entry (the target of Location)' })
   @ApiQuery({
     name: 'unit',
+    type: String,
     required: false,
     description: `The unit the weights are shown in, case-insensitive: ${SHARED_UNIT_REGISTRY.describe()}. Default kg.`,
     example: 'lb',
   })
   async findOne(
     @Param('userId', UserIdPipe) userId: string,
-    @Param(
-      'id',
-      new ParseUUIDPipe({ errorHttpStatusCode: HttpStatus.NOT_FOUND }),
-    )
+    @Param('id', new ParseUUIDPipe({ exceptionFactory: () => entryNotFound() }))
     id: string,
     @Query() query: EntryQueryDto,
   ) {

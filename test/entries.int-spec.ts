@@ -18,6 +18,43 @@ const ISO_MS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const UUID_V7 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
+// A set with this reps value is the one a test trigger acts on.
+const MARKER_REPS = 777;
+const markedSets = { sets: [{ reps: MARKER_REPS, weight: 100, unit: 'kg' }] };
+
+// Runs `run` while a BEFORE INSERT trigger on workout_sets executes `body`
+// (PL/pgSQL) for each row; the trigger is dropped afterwards in any case.
+async function withSetTrigger(
+  body: string,
+  run: () => Promise<void>,
+): Promise<void> {
+  await query(`CREATE FUNCTION test_set_trigger() RETURNS trigger
+                 LANGUAGE plpgsql AS $$ BEGIN ${body} RETURN NEW; END $$`);
+  await query(`CREATE TRIGGER test_set_trigger BEFORE INSERT ON workout_sets
+                 FOR EACH ROW EXECUTE FUNCTION test_set_trigger()`);
+  try {
+    await run();
+  } finally {
+    await query('DROP TRIGGER IF EXISTS test_set_trigger ON workout_sets');
+    await query('DROP FUNCTION IF EXISTS test_set_trigger()');
+  }
+}
+
+// The pid of the backend running a statement that matches `pattern`, polled
+// for up to five seconds while the request reaches the database.
+async function backendRunning(pattern: string): Promise<number> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const [row] = await query<{ pid: number }>(
+      `SELECT pid FROM pg_stat_activity
+        WHERE state = 'active' AND query ILIKE $1 AND pid <> pg_backend_pid()`,
+      [pattern],
+    );
+    if (row !== undefined) return row.pid;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`No backend is running ${pattern}`);
+}
+
 describe('log one entry (design §9.1)', () => {
   let app: INestApplication;
   const http = () => request(app.getHttpServer());
@@ -65,6 +102,14 @@ describe('log one entry (design §9.1)', () => {
     );
     const read = await http().get(res.headers.location).expect(200);
     expect(read.body).toEqual(res.body);
+    // createdAt is the row's created_at, to the millisecond.
+    const [row] = await query<{ created_at: string }>(
+      `SELECT to_char(created_at AT TIME ZONE 'UTC',
+                      'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at
+         FROM workout_entries WHERE id = $1`,
+      [id],
+    );
+    expect(res.body.data.createdAt).toBe(row.created_at);
     // Stored exactly, never rounded on write (§6), in request order.
     expect(
       await query(
@@ -121,6 +166,71 @@ describe('log one entry (design §9.1)', () => {
         message: "Unknown query parameter 'units'. Accepted parameters: unit.",
       },
     ]);
+    const stone = await http().get(`${path}?unit=stone`).expect(400);
+    expect(stone.headers['content-type']).toMatch(PROBLEM_JSON);
+    expect(stone.body.errors).toEqual([
+      {
+        path: 'unit',
+        message:
+          "Unsupported unit 'stone'. Supported units: kg (kgs), lb (lbs).",
+      },
+    ]);
+  });
+
+  it('the write rule reads the injected clock: 15 minutes after it → 201, 16 minutes → 400 at date', async () => {
+    const userId = uniqueUserId();
+    withStatus(
+      await postEntry(app, userId, entryBody({ date: '2025-02-11T03:15:00Z' })),
+      201,
+    );
+    const late = withStatus(
+      await postEntry(app, userId, entryBody({ date: '2025-02-11T03:16:00Z' })),
+      400,
+    );
+    expect(late.body.errors).toEqual([
+      { path: 'date', message: expect.any(String) },
+    ]);
+    expect(await rowsFor(userId)).toEqual({ entries: 1, sets: 2 });
+  });
+
+  it('a sets INSERT that fails → 500 and nothing written in either table (one transaction)', async () => {
+    const userId = uniqueUserId();
+    await withSetTrigger(
+      `IF NEW.reps = ${MARKER_REPS} THEN RAISE EXCEPTION 'test failure'; END IF;`,
+      async () => {
+        const res = withStatus(
+          await postEntry(app, userId, entryBody(markedSets)),
+          500,
+        );
+        expect(res.body).toMatchObject({
+          code: 'INTERNAL_ERROR',
+          requestId: expect.any(String),
+        });
+      },
+    );
+    expect(await rowsFor(userId)).toEqual({ entries: 0, sets: 0 });
+  });
+
+  it('a connection killed during the sets INSERT → a problem with a requestId, nothing written, and the next POST → 201', async () => {
+    const userId = uniqueUserId();
+    await withSetTrigger(
+      `IF NEW.reps = ${MARKER_REPS} THEN PERFORM pg_sleep(3); END IF;`,
+      async () => {
+        const pending = postEntry(app, userId, entryBody(markedSets)).then(
+          (res) => res,
+        );
+        await query('SELECT pg_terminate_backend($1)', [
+          await backendRunning('insert into "workout_sets"%'),
+        ]);
+        const res = await pending;
+        expect([500, 503]).toContain(res.status);
+        expect(res.headers['content-type']).toMatch(PROBLEM_JSON);
+        expect(res.body.requestId).toEqual(expect.any(String));
+      },
+    );
+    expect(await rowsFor(userId)).toEqual({ entries: 0, sets: 0 });
+    withStatus(await postEntry(app, userId), 201);
+    expect(await rowsFor(userId)).toEqual({ entries: 1, sets: 2 });
   });
 
   const set = (fields: Record<string, unknown>) => ({
@@ -178,6 +288,22 @@ describe('log one entry (design §9.1)', () => {
   it('an entry id that does not exist → 404; a non-UUID id → 404 NOT_FOUND, not a 500', async () => {
     const userId = uniqueUserId();
     const { id } = withStatus(await postEntry(app, userId), 201).body.data;
+    // A non-UUID id is answered as an id that does not exist.
+    const body = async (path: string) => {
+      const {
+        instance: _i,
+        requestId: _r,
+        ...rest
+      } = (await http().get(path).expect(404)).body;
+      return rest;
+    };
+    expect(
+      await body(`/v1/users/${userId}/workout-entries/not-a-uuid`),
+    ).toEqual(
+      await body(
+        `/v1/users/${userId}/workout-entries/0194f2fe-0000-7000-8000-000000000001`,
+      ),
+    );
     const paths = [
       `/v1/users/${userId}/workout-entries/0194f2fe-0000-7000-8000-000000000001`,
       `/v1/users/${userId}/workout-entries/not-a-uuid`,
