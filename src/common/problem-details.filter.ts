@@ -6,7 +6,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { get, kebabCase } from 'lodash';
+import get from 'lodash/get';
+import kebabCase from 'lodash/kebabCase';
 import { BODY_LIMIT } from './limits';
 import { requestIdOf } from './logger';
 import { ApiProblem, driverErrorCode, ProblemCode } from './problem';

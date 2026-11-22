@@ -1,5 +1,5 @@
 import { INestApplication, Logger } from '@nestjs/common';
-import { get } from 'lodash';
+import get from 'lodash/get';
 import request from 'supertest';
 import { createTestApp } from './support/app';
 import { ProbeController } from './support/probe.controller';
