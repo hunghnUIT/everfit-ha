@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ValidationArguments,
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
@@ -60,12 +61,24 @@ export const UTC_OFFSET_DESCRIPTION =
   'The UTC offset the date was written with, for display only. null when ' +
   'the client sent Z.';
 
+// Review Focus 1: a number sent as a string ("reps": "5") is refused, never
+// converted, and the message says the quotes are the fault. A short numeric
+// string is echoed as the fix; anything else gets a fixed example.
+function numberMessage(example: number, otherwise: string) {
+  return ({ property, value }: ValidationArguments): string => {
+    if (typeof value !== 'string') return otherwise;
+    return /^-?\d{1,9}(\.\d{1,9})?$/.test(value)
+      ? `'${property}' must be a JSON number, not a string: send ${value}, not "${value}".`
+      : `'${property}' must be a JSON number, not a string, for example ${example}.`;
+  };
+}
+
 export class SetInputDto {
   @ApiProperty({ minimum: 1, maximum: MAX_REPS, example: 5 })
   @IsDefined()
   @Max(MAX_REPS)
   @Min(1)
-  @IsInt()
+  @IsInt({ message: numberMessage(5, 'reps must be an integer number') })
   reps: number;
 
   @ApiProperty({
@@ -77,7 +90,10 @@ export class SetInputDto {
   @IsDefined()
   @Max(MAX_WEIGHT)
   @Min(0)
-  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @IsNumber(
+    { allowNaN: false, allowInfinity: false },
+    { message: numberMessage(100, 'weight must be a finite number') },
+  )
   weight: number;
 
   @ApiProperty({
@@ -110,8 +126,8 @@ export class EntryInputDto {
   @ApiProperty({ type: [SetInputDto], minItems: 1, maxItems: MAX_SETS })
   @IsDefined({ message: SHAPE_MESSAGES.sets })
   @ValidateNested({ each: true, message: SHAPE_MESSAGES.set })
-  @ArrayMaxSize(MAX_SETS)
-  @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_SETS, { message: SHAPE_MESSAGES.sets })
+  @ArrayMinSize(1, { message: SHAPE_MESSAGES.sets })
   @IsArray({ message: SHAPE_MESSAGES.sets })
   @Type(() => SetInputDto)
   sets: SetInputDto[];
@@ -129,8 +145,8 @@ export class BulkInputDto {
   @ApiProperty({ type: [EntryInputDto], minItems: 1, maxItems: MAX_BULK })
   @IsDefined({ message: SHAPE_MESSAGES.entries })
   @ValidateNested({ each: true, message: SHAPE_MESSAGES.entry })
-  @ArrayMaxSize(MAX_BULK)
-  @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_BULK, { message: SHAPE_MESSAGES.entries })
+  @ArrayMinSize(1, { message: SHAPE_MESSAGES.entries })
   @IsArray({ message: SHAPE_MESSAGES.entries })
   @Type(() => EntryInputDto)
   entries: EntryInputDto[];

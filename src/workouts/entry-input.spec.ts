@@ -1,6 +1,8 @@
 import 'reflect-metadata';
+import fc from 'fast-check';
 import { UnitRegistry } from '../units/unit-registry';
 import { parseWriteDate } from './domain/dates';
+import { SHAPE_MESSAGES } from './dto/entry-input.dto';
 import { readEntryInputs } from './entry-input';
 
 const deps = {
@@ -9,6 +11,9 @@ const deps = {
 };
 
 const PATH_USER = 'u_123';
+
+// Ten times the measured time of the case it bounds (see the report).
+const BUDGET_MS = 2_000;
 
 // The request of design §9.1.
 const benchPress = () => ({
@@ -28,6 +33,11 @@ const errorsOf = (result: ReturnType<typeof single>) =>
   result.ok ? [] : result.errors;
 const pathsOf = (result: ReturnType<typeof single>) =>
   errorsOf(result).map((error) => error.path);
+
+const oneSet = (set: Record<string, unknown>) => ({
+  ...benchPress(),
+  sets: [{ reps: 5, weight: 100, unit: 'kg', ...set }],
+});
 
 const UNKNOWN_UNIT =
   "Unsupported unit 'stone'. Supported units: kg (kgs), lb (lbs).";
@@ -117,6 +127,16 @@ describe('readEntryInputs (design §9.1)', () => {
     expect(wrongType[0].message).not.toMatch(/does not match/);
   });
 
+  it('takes "userId": null as absent, and still refuses a different userId', () => {
+    expect(single({ ...benchPress(), userId: null }).ok).toBe(true);
+    expect(errorsOf(single({ ...benchPress(), userId: 'u_999' }))).toEqual([
+      {
+        path: 'userId',
+        message: "'u_999' does not match the userId in the path, 'u_123'.",
+      },
+    ]);
+  });
+
   it('gives one error per path: "date": null and a 101-character name each give exactly one', () => {
     expect(pathsOf(single({ ...benchPress(), date: null }))).toEqual(['date']);
     expect(
@@ -129,38 +149,122 @@ describe('readEntryInputs (design §9.1)', () => {
       ...benchPress(),
       sets: [{ reps: '5', weight: '225', unit: 'lb' }],
     };
-    expect(pathsOf(single(body)).sort()).toEqual([
-      'sets[0].reps',
-      'sets[0].weight',
+    expect(errorsOf(single(body))).toEqual([
+      {
+        path: 'sets[0].reps',
+        message: `'reps' must be a JSON number, not a string: send 5, not "5".`,
+      },
+      {
+        path: 'sets[0].weight',
+        message: `'weight' must be a JSON number, not a string: send 225, not "225".`,
+      },
     ]);
   });
 
-  const oneSet = (set: Record<string, unknown>) => ({
-    ...benchPress(),
-    sets: [{ reps: 5, weight: 100, unit: 'kg', ...set }],
-  });
+  it('words a non-numeric string without echoing it as a number', () =>
+    expect(errorsOf(single(oneSet({ weight: 'heavy' })))).toEqual([
+      {
+        path: 'sets[0].weight',
+        message: `'weight' must be a JSON number, not a string, for example 100.`,
+      },
+    ]));
+
+  const fiftyOneSets = Array.from({ length: 51 }, () => ({
+    reps: 5,
+    weight: 100,
+    unit: 'kg',
+  }));
 
   it.each([
-    ['weight 10.1234', oneSet({ weight: 10.1234 }), 'sets[0].weight'],
-    ['weight 10 000.001', oneSet({ weight: 10_000.001 }), 'sets[0].weight'],
-    ['weight 1e-7', oneSet({ weight: 1e-7 }), 'sets[0].weight'],
-    ['reps 1 001', oneSet({ reps: 1_001 }), 'sets[0].reps'],
-    ['reps 5.5', oneSet({ reps: 5.5 }), 'sets[0].reps'],
+    ['weight 10.1234', 'sets[0].weight', oneSet({ weight: 10.1234 })],
+    ['weight 10 000.001', 'sets[0].weight', oneSet({ weight: 10_000.001 })],
+    ['weight 1e-7', 'sets[0].weight', oneSet({ weight: 1e-7 })],
+    ['reps 1 001', 'sets[0].reps', oneSet({ reps: 1_001 })],
+    ['reps 5.5', 'sets[0].reps', oneSet({ reps: 5.5 })],
+    ['51 sets', 'sets', { ...benchPress(), sets: fiftyOneSets }],
+    ['weight null', 'sets[0].weight', oneSet({ weight: null })],
+    ['unit 5', 'sets[0].unit', oneSet({ unit: 5 })],
+    ['sets: [[]]', 'sets[0]', { ...benchPress(), sets: [[]] }],
+    ['sets: [null]', 'sets[0]', { ...benchPress(), sets: [null] }],
+  ])('%s → one error at %s', (_label, path, body) =>
+    expect(pathsOf(single(body))).toEqual([path]),
+  );
+
+  it.each([
+    ['no sets', { ...benchPress(), sets: [] }],
     [
-      '51 sets',
+      '51 object sets with a bad unit',
       {
         ...benchPress(),
         sets: Array.from({ length: 51 }, () => ({
           reps: 5,
           weight: 100,
-          unit: 'kg',
+          unit: 'stone',
         })),
       },
-      'sets',
     ],
-  ])('%s → one error at %s', (_label, body, path) =>
-    expect(pathsOf(single(body))).toEqual([path]),
+    [
+      '51 non-object sets',
+      { ...benchPress(), sets: Array.from({ length: 51 }, () => 0) },
+    ],
+  ])('%s → the one sets error, with the expected shape', (_label, body) =>
+    expect(errorsOf(single(body))).toEqual([
+      { path: 'sets', message: SHAPE_MESSAGES.sets },
+    ]),
   );
+
+  it('an entry over the sets cap gets one error there; the other entries are still checked', () => {
+    const body = {
+      entries: [
+        oneSet({ unit: 'stone' }),
+        { ...benchPress(), sets: Array.from({ length: 51 }, () => 0) },
+      ],
+    };
+    expect(errorsOf(bulk(body))).toEqual([
+      { path: 'entries[1].sets', message: SHAPE_MESSAGES.sets },
+      { path: 'entries[0].sets[0].unit', message: UNKNOWN_UNIT },
+    ]);
+  });
+
+  it.each([
+    ['no entries', { entries: [] }],
+    ['101 entries', { entries: Array.from({ length: 101 }, benchPress) }],
+    [
+      '20 000 non-object entries',
+      { entries: Array.from({ length: 20_000 }, () => 0) },
+    ],
+  ])('%s → the one entries error, with no per-item errors', (_label, body) =>
+    expect(errorsOf(bulk(body))).toEqual([
+      { path: 'entries', message: SHAPE_MESSAGES.entries },
+    ]),
+  );
+
+  it('reads the largest invalid body inside the caps in well under a second', () => {
+    // 100 entries × 50 sets, every reps and weight a string: 10 000 errors.
+    const body = {
+      entries: Array.from({ length: 100 }, () => ({
+        ...benchPress(),
+        sets: Array.from({ length: 50 }, () => ({
+          reps: '5',
+          weight: '100',
+          unit: 'kg',
+        })),
+      })),
+    };
+    const start = performance.now();
+    const errors = errorsOf(bulk(body));
+    const elapsed = performance.now() - start;
+    expect(errors).toHaveLength(10_000);
+    expect(elapsed).toBeLessThan(BUDGET_MS);
+  });
+
+  it('keeps weight 0.125 (a micro-plate) as the exact string', () => {
+    const result = single(oneSet({ weight: 0.125 }));
+    expect(result.ok && result.value[0].sets[0]).toMatchObject({
+      weight: '0.125',
+      weightKg: '0.125',
+    });
+  });
 
   it('accepts weight 0 (a bodyweight set)', () => {
     const result = single(oneSet({ weight: 0 }));
@@ -171,31 +275,155 @@ describe('readEntryInputs (design §9.1)', () => {
   });
 
   it.each([
-    ['no body', 'single', undefined, '', '"exerciseName"'],
-    ['an array', 'single', [benchPress()], '', '"exerciseName"'],
-    ['null', 'single', null, '', '"exerciseName"'],
-    ['"sets": {}', 'single', { ...benchPress(), sets: {} }, 'sets', '"reps"'],
+    ['no body', 'single', '', undefined, SHAPE_MESSAGES.singleBody],
+    ['an array', 'single', '', [benchPress()], SHAPE_MESSAGES.singleBody],
+    ['null', 'single', '', null, SHAPE_MESSAGES.singleBody],
+    ['{} (an empty JSON body)', 'single', '', {}, SHAPE_MESSAGES.singleBody],
+    [
+      '"sets": {}',
+      'single',
+      'sets',
+      { ...benchPress(), sets: {} },
+      SHAPE_MESSAGES.sets,
+    ],
     [
       '{ "entries": [null] }',
       'bulk',
-      { entries: [null] },
       'entries[0]',
-      '"exerciseName"',
+      { entries: [null] },
+      SHAPE_MESSAGES.entry,
     ],
-    ['a bare array', 'bulk', [benchPress()], '', '"entries"'],
+    ['a bare array', 'bulk', '', [benchPress()], SHAPE_MESSAGES.bulkBody],
+    ['{} (an empty JSON body)', 'bulk', 'entries', {}, SHAPE_MESSAGES.entries],
   ] as const)(
     '%s on %s → one error at %p showing the expected shape',
-    (_label, shape, body, path, shown) => {
-      const errors = errorsOf(readEntryInputs(body, shape, PATH_USER, deps));
-      expect(errors).toEqual([{ path, message: expect.any(String) }]);
-      expect(errors[0].message).toContain(shown);
+    (_label, shape, path, body, message) =>
+      expect(errorsOf(readEntryInputs(body, shape, PATH_USER, deps))).toEqual([
+        { path, message },
+      ]),
+  );
+
+  it('an object with some property is read field by field, not as a shape error', () =>
+    expect(pathsOf(single({ date: '2025-02-10T05:30:00+07:00' }))).toEqual([
+      'exerciseName',
+      'sets',
+    ]));
+
+  // Nest's ValidationPipe strips these keys before class-transformer, which
+  // throws on a truthy non-class "constructor"; readEntryInputs must too.
+  it('"date": {"constructor": 1} → one error at date, and the input is not changed', () => {
+    const text = JSON.stringify({ ...benchPress(), date: { constructor: 1 } });
+    const body: unknown = JSON.parse(text);
+    expect(pathsOf(single(body))).toEqual(['date']);
+    expect(JSON.stringify(body)).toBe(text);
+  });
+
+  it.each([
+    [
+      "a set's weight",
+      '{"weight":{"constructor":1,"__proto__":{"a":1}}}',
+      'sets',
+    ],
+    [
+      'an unknown property',
+      '{"extra":{"constructor":"x","prototype":1}}',
+      'top',
+    ],
+    ['two levels down', '{"extra":{"a":{"constructor":true}}}', 'top'],
+  ])(
+    'a prototype key in %s gives a Check, never a throw',
+    (_label, json, where) => {
+      const inner = JSON.parse(json) as Record<string, unknown>;
+      const body =
+        where === 'sets'
+          ? { ...benchPress(), sets: [{ reps: 5, unit: 'kg', ...inner }] }
+          : { ...benchPress(), ...inner };
+      const result = single(JSON.parse(JSON.stringify(body)));
+      expect(result.ok).toBe(false);
     },
   );
 
+  it('never throws, and gives one error per path, for any JSON (keys biased to prototype names)', () => {
+    const key = fc.oneof(
+      fc.constantFrom(
+        'constructor',
+        '__proto__',
+        'prototype',
+        'toString',
+        'valueOf',
+      ),
+      fc.constantFrom(
+        'date',
+        'exerciseName',
+        'userId',
+        'sets',
+        'reps',
+        'weight',
+        'unit',
+        'entries',
+      ),
+      fc.string({ maxLength: 4 }),
+    );
+    const { value } = fc.letrec((tie) => ({
+      value: fc.oneof(
+        { depthSize: 'small' },
+        fc.jsonValue({ maxDepth: 0 }),
+        fc.array(tie('value'), { maxLength: 3 }),
+        fc.dictionary(key, tie('value'), { maxKeys: 4 }),
+      ),
+    }));
+    const set = fc.oneof(
+      value,
+      fc.record(
+        { reps: value, weight: value, unit: value },
+        { requiredKeys: [] },
+      ),
+    );
+    const entry = fc.oneof(
+      value,
+      fc.record(
+        {
+          date: value,
+          exerciseName: value,
+          userId: value,
+          sets: fc.oneof(value, fc.array(set, { maxLength: 3 })),
+          constructor: value,
+        },
+        { requiredKeys: [] },
+      ),
+    );
+    const body = fc.oneof(
+      entry,
+      fc.record({
+        entries: fc.oneof(value, fc.array(entry, { maxLength: 3 })),
+      }),
+    );
+    fc.assert(
+      fc.property(
+        body,
+        fc.constantFrom('single' as const, 'bulk' as const),
+        (raw, shape) => {
+          // Through JSON text, as a request arrives: own __proto__ keys included.
+          const parsed: unknown = JSON.parse(JSON.stringify(raw) ?? 'null');
+          const result = readEntryInputs(parsed, shape, PATH_USER, deps);
+          if (result.ok) return;
+          const paths = result.errors.map((error) => error.path);
+          expect(paths.length).toBeGreaterThan(0);
+          expect(new Set(paths).size).toBe(paths.length);
+        },
+      ),
+      { numRuns: 300 },
+    );
+  });
+
   it('assigns v7 ids that increase in input order', () => {
-    const result = bulk({ entries: Array.from({ length: 5 }, benchPress) });
-    const ids = result.ok ? result.value.map((entry) => entry.id) : [];
-    expect(ids).toHaveLength(5);
+    const names = ['Squat', 'Bench Press', 'Deadlift', 'Overhead Press', 'Row'];
+    const result = bulk({
+      entries: names.map((exerciseName) => ({ ...benchPress(), exerciseName })),
+    });
+    const entries = result.ok ? result.value : [];
+    expect(entries.map((entry) => entry.exerciseName)).toEqual(names);
+    const ids = entries.map((entry) => entry.id);
     for (const id of ids) {
       expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-/);
     }

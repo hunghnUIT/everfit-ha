@@ -2,9 +2,10 @@ import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import type Decimal from 'decimal.js';
 import isPlainObject from 'lodash/isPlainObject';
+import { stripProtoKeys } from '@nestjs/common/utils/strip-proto-keys.util.js';
 import { v7 } from 'uuid';
 import { decimalFromNumber, decimalPlaces } from '../common/decimal';
-import { MAX_WEIGHT_DECIMALS } from '../common/limits';
+import { MAX_BULK, MAX_SETS, MAX_WEIGHT_DECIMALS } from '../common/limits';
 import { Check, FieldError } from '../common/problem';
 import { toFieldErrors, VALIDATOR_OPTIONS } from '../common/validation';
 import { checkExerciseName } from '../exercises/name-rules';
@@ -43,35 +44,67 @@ type Deps = { units: UnitRegistry; now: Temporal.Instant };
 
 type Draft = Omit<NewEntry, 'id' | 'userId'>;
 
-// `path` is `base` or lies inside it: sets[0].unit is under sets and sets[0].
-function isUnder(path: string, base: string): boolean {
-  return (
-    path === base || path.startsWith(`${base}.`) || path.startsWith(`${base}[`)
-  );
+// Paths that failed, looked up with their ancestors: sets[0].unit counts as
+// failed when sets or sets[0] failed. A set keeps the lookup linear in the
+// number of errors; a scan per lookup made a body with many errors quadratic.
+// Hand-written: no library walks a path's ancestors in this notation.
+class FailedPaths {
+  private readonly paths = new Set<string>();
+
+  add(path: string): void {
+    this.paths.add(path);
+  }
+
+  has(path: string): boolean {
+    for (let i = 0; i < path.length; i++) {
+      if (
+        (path[i] === '.' || path[i] === '[') &&
+        this.paths.has(path.slice(0, i))
+      ) {
+        return true;
+      }
+    }
+    return this.paths.has(path);
+  }
 }
 
 const join = (prefix: string, key: string) =>
   prefix ? `${prefix}.${key}` : key;
 
-// Step 1: the shape class-validator does not word or does not catch. A
-// nested array passes its ValidateNested, so each entry and each set is
-// checked to be an object here.
+// Step 1: the shape class-validator does not word or does not catch, on the
+// item's own copy. A nested array passes its ValidateNested, so each entry
+// and each set is checked to be an object here. Sets over the cap give their
+// one error first, and are emptied in the copy, so no per-set work follows
+// (the DTO's error for the emptied array is then dropped: sets has failed).
 function shapeErrors(item: unknown, prefix: string): FieldError[] {
   if (!isPlainObject(item)) {
     return [{ path: prefix, message: SHAPE_MESSAGES.entry }];
   }
-  const sets: unknown = (item as Record<string, unknown>).sets;
+  const entry = item as Record<string, unknown>;
+  const sets = entry.sets;
   if (!Array.isArray(sets)) return [];
+  const setsPath = join(prefix, 'sets');
+  if (sets.length > MAX_SETS) {
+    entry.sets = [];
+    return [{ path: setsPath, message: SHAPE_MESSAGES.sets }];
+  }
   return sets.flatMap((set, j) =>
     isPlainObject(set)
       ? []
-      : [
-          {
-            path: `${join(prefix, 'sets')}[${j}]`,
-            message: SHAPE_MESSAGES.set,
-          },
-        ],
+      : [{ path: `${setsPath}[${j}]`, message: SHAPE_MESSAGES.set }],
   );
+}
+
+// class-transformer throws on a truthy non-class "constructor" key, so the
+// keys __proto__, prototype and constructor are removed at every depth before
+// plainToInstance. This mirrors Nest's ValidationPipe, which calls the same
+// function; readEntryInputs is called on a raw body that does not go through
+// the pipe. It strips in place, so it works on a copy and the caller's value
+// is left as it was.
+function strippedCopy(body: object): Record<string, unknown> {
+  const copy = structuredClone(body) as Record<string, unknown>;
+  stripProtoKeys(copy);
+  return copy;
 }
 
 // Step 3 for one item. Each check runs only when its field has no shape or
@@ -95,8 +128,8 @@ function readItem(
   for (const check of [date, name]) {
     if (check?.ok === false) errors.push(...check.errors);
   }
-  // The cross-field rule reads userId alone (null counts as absent, as
-  // @IsOptional treats it).
+  // The cross-field rule reads userId alone. null counts as absent: serializers
+  // emit null for an unset field, and @IsOptional treats it so.
   const userId = item.userId;
   if (
     !failed(at('userId')) &&
@@ -185,7 +218,22 @@ export function readEntryInputs(
       shape === 'single' ? SHAPE_MESSAGES.singleBody : SHAPE_MESSAGES.bulkBody;
     return { ok: false, errors: [{ path: '', message }] };
   }
-  const raw = body as Record<string, unknown>;
+  const raw = strippedCopy(body as object);
+  // An empty JSON body arrives as {} (body-parser's doing): on the single
+  // route it is answered with the whole expected object, not three fields.
+  if (shape === 'single' && Object.keys(raw).length === 0) {
+    return {
+      ok: false,
+      errors: [{ path: '', message: SHAPE_MESSAGES.singleBody }],
+    };
+  }
+  // Over the cap, the one error and no per-item work, however many items.
+  if (Array.isArray(raw.entries) && raw.entries.length > MAX_BULK) {
+    return {
+      ok: false,
+      errors: [{ path: 'entries', message: SHAPE_MESSAGES.entries }],
+    };
+  }
   const rawItems: unknown[] =
     shape === 'single' ? [raw] : Array.isArray(raw.entries) ? raw.entries : [];
   const prefixes = rawItems.map((_, i) =>
@@ -197,14 +245,17 @@ export function readEntryInputs(
   const inputErrors = rawItems.flatMap((item, i) =>
     shapeErrors(item, prefixes[i]),
   );
-  const failed = (path: string) =>
-    inputErrors.some((error) => isUnder(path, error.path));
+  const failedPaths = new FailedPaths();
+  for (const error of inputErrors) failedPaths.add(error.path);
+  const failed = (path: string) => failedPaths.has(path);
   const dto =
     shape === 'single'
       ? plainToInstance(EntryInputDto, raw)
       : plainToInstance(BulkInputDto, raw);
   for (const error of toFieldErrors(validateSync(dto, VALIDATOR_OPTIONS))) {
-    if (!failed(error.path)) inputErrors.push(error);
+    if (failed(error.path)) continue;
+    inputErrors.push(error);
+    failedPaths.add(error.path);
   }
   // Indexed as rawItems: entries is an array whenever rawItems is not empty.
   const items = dto instanceof BulkInputDto ? dto.entries : [dto];
