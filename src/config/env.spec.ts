@@ -51,6 +51,17 @@ describe('validateApiEnv', () => {
     ).toBe(token);
   });
 
+  it('treats an empty ADMIN_API_TOKEN as unset', () =>
+    // compose passes the empty value from .env.example on a default start
+    expect(validateApiEnv({ DATABASE_URL: url, ADMIN_API_TOKEN: '' })).toEqual({
+      DATABASE_URL: url,
+      PORT: 3000,
+      LOG_LEVEL: 'info',
+      DB_POOL_MAX: 10,
+      DB_STATEMENT_TIMEOUT_MS: 5000,
+      CATALOG_REFRESH_SECONDS: 300,
+    }));
+
   it('lists every bad variable, one line each', () => {
     let message = '';
     try {
