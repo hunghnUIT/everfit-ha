@@ -5,6 +5,7 @@ import { loggerParams } from './common/logger';
 import { ApiEnv, validateApiEnv } from './config/env';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
+import { UnitsModule } from './units/units.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { HealthModule } from './health/health.module';
     }),
     DatabaseModule,
     HealthModule,
+    UnitsModule,
   ],
 })
 export class AppModule {}
