@@ -41,11 +41,14 @@ describe('the admin guard applied to CatalogAdminController', () => {
 
   it('with AdminOnly applied to the real CatalogAdminController: each route 401 with WWW-Authenticate: Bearer without the token, success with it; GET /v1/exercises unaffected', async () => {
     const body = { name: 'Guarded Row', muscleGroups: ['back'] };
+    const group = { name: 'Guarded Group' };
     const path = '/v1/admin/exercises/guarded%20row';
     const routes = [
       () => http().post('/v1/admin/exercises').send(body),
       () => http().put(path).send(body),
       () => http().delete(path),
+      () => http().post('/v1/admin/muscle-groups').send(group),
+      () => http().delete('/v1/admin/muscle-groups/guarded%20group'),
     ];
     for (const send of routes) {
       const res = withStatus(await send(), 401);
@@ -68,6 +71,19 @@ describe('the admin guard applied to CatalogAdminController', () => {
       200,
     );
     withStatus(await http().delete(path).set('Authorization', bearer), 204);
+    withStatus(
+      await http()
+        .post('/v1/admin/muscle-groups')
+        .set('Authorization', bearer)
+        .send(group),
+      201,
+    );
+    withStatus(
+      await http()
+        .delete('/v1/admin/muscle-groups/guarded%20group')
+        .set('Authorization', bearer),
+      204,
+    );
 
     await http().get('/v1/exercises').expect(200);
   });

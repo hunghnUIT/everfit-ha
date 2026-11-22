@@ -1,6 +1,8 @@
 import { INestApplication } from '@nestjs/common';
+import { Client } from 'pg';
 import request from 'supertest';
 import { CLOCK, fixedClock } from '../src/common/clock';
+import { CATALOG_WRITE_LOCK } from '../src/database/locks';
 import { createTestApp } from './support/app';
 import { query } from './support/database';
 import {
@@ -260,5 +262,142 @@ describe('catalog administration: exercises', () => {
       201,
     );
     expect(res.body.data.muscleGroups).toEqual(['rotator cuff', 'shoulders']);
+  });
+
+  it('a catalog write waits for the catalog write lock, then completes with its normal status', async () => {
+    // A second connection holds the lock the way a seed run does.
+    const holder = new Client({ connectionString: process.env.DATABASE_URL });
+    await holder.connect();
+    let released = false;
+    try {
+      await holder.query('SELECT pg_advisory_lock($1)', [CATALOG_WRITE_LOCK]);
+      let settled = false;
+      const pending = create({
+        name: 'Lock Probe Row',
+        muscleGroups: ['back'],
+      }).then((res) => {
+        settled = true;
+        return res;
+      });
+
+      // Bounded wait for the write to be queued on the lock; the poll is the
+      // check, the pause only spaces the polls.
+      let waiting = 0;
+      for (let i = 0; i < 100 && waiting === 0; i++) {
+        const rows = await query<{ n: string }>(
+          `SELECT count(*) AS n FROM pg_stat_activity
+            WHERE wait_event_type = 'Lock' AND wait_event = 'advisory'
+              AND pid <> $1`,
+          [(await holder.query('SELECT pg_backend_pid() AS pid')).rows[0].pid],
+        );
+        waiting = Number(rows[0].n);
+        if (waiting === 0) await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(waiting).toBe(1);
+      expect(settled).toBe(false);
+      expect(
+        await query(
+          "SELECT 1 FROM exercises WHERE exercise_key = 'lock probe row'",
+        ),
+      ).toHaveLength(0);
+
+      await holder.query('SELECT pg_advisory_unlock($1)', [CATALOG_WRITE_LOCK]);
+      released = true;
+      const res = withStatus(await pending, 201);
+      expect(res.body.data.key).toBe('lock probe row');
+    } finally {
+      if (!released) {
+        await holder.query('SELECT pg_advisory_unlock_all()').catch(() => {});
+      }
+      await holder.end();
+    }
+  });
+});
+
+// The two muscle-group routes (design §10.5).
+describe('catalog administration: muscle groups', () => {
+  let app: INestApplication;
+  const http = () => request(app.getHttpServer());
+  const createGroup = (name: unknown) =>
+    http().post('/v1/admin/muscle-groups').send({ name });
+  const deleteGroup = (name: string) =>
+    http().delete(`/v1/admin/muscle-groups/${encodeURIComponent(name)}`);
+
+  beforeAll(async () => {
+    app = await createTestApp();
+  });
+
+  it('a new group → 201; again → 409 MUSCLE_GROUP_EXISTS', async () => {
+    const res = withStatus(await createGroup('  Forearm   Flexors '), 201);
+    expect(res.body.data).toEqual({
+      name: 'forearm flexors',
+      createdAt: expect.stringMatching(ISO_MS),
+    });
+    expect(await groupsInTable()).toContain('forearm flexors');
+
+    const again = withStatus(await createGroup('FOREARM flexors'), 409);
+    expect(again.headers['content-type']).toMatch(PROBLEM_JSON);
+    expect(again.body.code).toBe('MUSCLE_GROUP_EXISTS');
+
+    // The name rule is the one of every other write: a 400 naming "name".
+    const bad = withStatus(await createGroup('   '), 400);
+    expect(bad.body.errors[0].path).toBe('name');
+    const missing = withStatus(
+      await http().post('/v1/admin/muscle-groups').send({}),
+      400,
+    );
+    expect(missing.body.errors[0].path).toBe('name');
+  });
+
+  it('deleting a group in use → 409 MUSCLE_GROUP_IN_USE (the 23503 of NO ACTION), saying how many exercises list it; unknown → 404', async () => {
+    withStatus(await createGroup('Grip'), 201);
+    for (const name of ['Grip Test A', 'Grip Test B']) {
+      withStatus(
+        await http()
+          .post('/v1/admin/exercises')
+          .send({ name, muscleGroups: ['grip', 'back'] }),
+        201,
+      );
+    }
+    const res = withStatus(await deleteGroup('GRIP'), 409);
+    expect(res.headers['content-type']).toMatch(PROBLEM_JSON);
+    expect(res.body.code).toBe('MUSCLE_GROUP_IN_USE');
+    expect(res.body.detail).toContain('2 exercises');
+    expect(await groupsInTable()).toContain('grip');
+
+    const missing = withStatus(await deleteGroup('no such group'), 404);
+    expect(missing.body.code).toBe('NOT_FOUND');
+  });
+
+  it('deleting an unused group → 204 with an empty body', async () => {
+    withStatus(await createGroup('Hip Flexors'), 201);
+    const res = withStatus(await deleteGroup('hip flexors'), 204);
+    expect(res.text).toBe('');
+    expect(await groupsInTable()).not.toContain('hip flexors');
+    // The exercise write now refuses it, as an unknown group.
+    withStatus(
+      await http()
+        .post('/v1/admin/exercises')
+        .send({ name: 'Hip Thing', muscleGroups: ['hip flexors'] }),
+      400,
+    );
+  });
+
+  it('a group created through a second app instance is accepted at once by an exercise write on the first', async () => {
+    const second = await createTestApp();
+    withStatus(
+      await request(second.getHttpServer())
+        .post('/v1/admin/muscle-groups')
+        .send({ name: 'Peroneals' }),
+      201,
+    );
+    // The first app's snapshot never saw it: the write reads the table.
+    const res = withStatus(
+      await http()
+        .post('/v1/admin/exercises')
+        .send({ name: 'Peroneal Raise', muscleGroups: ['peroneals'] }),
+      201,
+    );
+    expect(res.body.data.muscleGroups).toEqual(['peroneals']);
   });
 });

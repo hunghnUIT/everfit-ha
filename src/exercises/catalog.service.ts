@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { eq, sql } from 'drizzle-orm';
+import { count, eq, sql } from 'drizzle-orm';
 import { MAX_GROUPS_PER_EXERCISE } from '../common/limits';
 import {
   ApiProblem,
@@ -17,8 +17,13 @@ import {
 } from '../database/schema';
 import { DB, type Database, type Executor } from '../database/tokens';
 import { ExerciseWriteDto } from './dto/exercise-write.dto';
+import { MuscleGroupWriteDto } from './dto/muscle-group-write.dto';
 import { EXERCISE_CATALOG, type ExerciseCatalog } from './exercise-catalog';
-import { collapseWhitespace, exerciseKey } from './exercise-key';
+import {
+  collapseWhitespace,
+  exerciseKey,
+  muscleGroupName,
+} from './exercise-key';
 import { checkExerciseName, checkMuscleGroupName } from './name-rules';
 
 // The catalog's writes (design §10.5, §10.6). Every write goes through
@@ -34,6 +39,14 @@ export const EXERCISE_ROUTES = {
   replace: 'PUT /v1/admin/exercises/:exerciseKey',
   delete: 'DELETE /v1/admin/exercises/:exerciseKey',
 } as const;
+
+export const MUSCLE_GROUP_ROUTES = {
+  create: 'POST /v1/admin/muscle-groups',
+  delete: 'DELETE /v1/admin/muscle-groups/:name',
+} as const;
+
+// The body of POST /v1/admin/muscle-groups: the stored name and its time.
+export type MuscleGroupJson = { name: string; createdAt: string };
 
 // The body of the exercise routes, as GET /v1/exercises shows an exercise.
 export type ExerciseJson = {
@@ -242,6 +255,86 @@ export class CatalogService {
         if (rows.length === 0) throw exerciseNotFound(key);
       },
     );
+  }
+
+  // POST: the name rule is the one of every other write. INSERT … ON CONFLICT
+  // DO NOTHING RETURNING; no row back is the 409.
+  async createMuscleGroup(body: MuscleGroupWriteDto): Promise<MuscleGroupJson> {
+    const checked = checkMuscleGroupName(body.name, 'name');
+    if (!checked.ok) throw validationProblem(checked.errors);
+    const name = checked.value;
+    return this.withCatalogWrite(
+      { route: MUSCLE_GROUP_ROUTES.create, key: name },
+      async (tx) => {
+        const [row] = await tx
+          .insert(muscleGroups)
+          .values({ name })
+          .onConflictDoNothing()
+          .returning({ createdAt: muscleGroups.createdAt });
+        if (row === undefined) {
+          throw new ApiProblem(
+            409,
+            'MUSCLE_GROUP_EXISTS',
+            `The muscle group "${name}" already exists.`,
+          );
+        }
+        return { name, createdAt: row.createdAt.toISOString() };
+      },
+    );
+  }
+
+  // DELETE: refused while an exercise lists the group. The exercises are
+  // counted first, under the lock, because a 23503 aborts the transaction and
+  // nothing could be read after it. The delete still runs in a savepoint: a
+  // link added since the count by a writer that does not take the lock (SQL
+  // typed by hand) is the same 409, from the foreign key (NO ACTION).
+  async deleteMuscleGroup(pathValue: string): Promise<void> {
+    const name = muscleGroupName(pathValue);
+    await this.withCatalogWrite(
+      { route: MUSCLE_GROUP_ROUTES.delete, key: name },
+      async (tx) => {
+        const [group] = await tx
+          .select({ name: muscleGroups.name })
+          .from(muscleGroups)
+          .where(eq(muscleGroups.name, name));
+        if (group === undefined) {
+          throw new ApiProblem(
+            404,
+            'NOT_FOUND',
+            `No muscle group is named "${name}".`,
+          );
+        }
+        await this.refuseIfInUse(tx, name);
+        try {
+          await tx.transaction(async (savepoint) => {
+            await savepoint
+              .delete(muscleGroups)
+              .where(eq(muscleGroups.name, name));
+          });
+        } catch (error) {
+          if (driverErrorCode(error) === FOREIGN_KEY_VIOLATION) {
+            await this.refuseIfInUse(tx, name);
+          }
+          throw error;
+        }
+      },
+    );
+  }
+
+  private async refuseIfInUse(tx: Executor, name: string): Promise<void> {
+    const [row] = await tx
+      .select({ n: count() })
+      .from(exerciseMuscleGroups)
+      .where(eq(exerciseMuscleGroups.muscleGroup, name));
+    const n = row?.n ?? 0;
+    if (n > 0) {
+      throw new ApiProblem(
+        409,
+        'MUSCLE_GROUP_IN_USE',
+        `The muscle group "${name}" is still listed by ${n} ${n === 1 ? 'exercise' : 'exercises'}. ` +
+          'Change or delete those exercises first.',
+      );
+    }
   }
 
   private read(body: ExerciseWriteDto): ExerciseWrite {
