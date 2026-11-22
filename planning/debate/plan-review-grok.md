@@ -1,0 +1,70 @@
+# Plan review — Grok 4.7 (GitHub Copilot CLI, high effort, no tools)
+
+The reply as received, unedited. Prompt: `plan-review-prompt.md`.
+
+---
+
+Model: Grok 4.7 (grok-4.7)
+
+## Verdict
+
+Not ready. Several steps fail as written, and several tests stay green while a grader’s `docker compose up` / curl / `/docs` path is wrong. Do not start Task 1 until the filter, body-parser, image, and shared-database holes below are written into the tasks. The slice order, one commit per task, and “never cut” fixtures can stay.
+
+Concession: the PG 18 volume path, `Z` vs `+00:00`, half-open bounds, ranking fixture, and migrate-not-in-`api` match the design and should not be reopened.
+
+## Findings
+
+| # | Task and step | Problem | Who meets it, and how often | Evidence | Fix |
+|---|---|---|---|---|---|
+| 1 | Task 3 produces `resetDatabase()`; no step calls it | One Testcontainers DB, `--runInBand`, no per-file reset. Later `*.int-spec.ts` files see earlier rows. Agents will reuse `u_123`. | Every agent from Task 10 on, very often; CI flakes | From the plan (helper never referenced again). Review setup says reset between files | Task 3: Jest `setupFilesAfterEnv` for the `int` project calls `resetDatabase()` before each file. Task 8: that helper truncates catalog + ledger and re-seeds. State that a “stays deleted” test must not reset between the two seed runs |
+| 2 | Task 2 Step 5; Task 10 Step 3 | Nest’s default parser stays on (`bodyParser: true`, 100kb JSON + urlencoded). A second `express.json({ limit: '1mb' })` never sees the body. Task 2’s “over 1 MB → 413” still passes at 100kb | Grader with a large Postman body, sometimes; agent almost certainly ships 100kb | Recalled: Nest default limit is `100kb`. Plan never sets `bodyParser: false` | In Task 1’s `main.ts` and `createTestApp`: `NestFactory.create(AppModule, { bodyParser: false })`. One `express.json({ limit: BODY_LIMIT, type: 'application/json' })` in `configureApp` (Task 10 replaces the Task 2 literal). Add a test: 200 KB body is not 413; over 1 MB is |
+| 3 | Task 2 Step 5 vs Task 17 Step 3 | Filter table sends every non-`ApiProblem` to 500. `UnauthorizedException` becomes 500. Step 5 never sets `Content-Type: application/problem+json` or copies `ApiProblem.headers`. Terminus writes `/health/ready` 503 itself, so it also skips the filter | Task 17 agent, very often; grader checking `curl -v` on a 400, often | From the plan’s filter table; design §9.6 (every non-2xx is `application/problem+json`; 401 carries `WWW-Authenticate`) | Task 2 Step 5: set `application/problem+json`; apply `headers`; map `UnauthorizedException` only if it is an `ApiProblem`. Task 17: `throw new ApiProblem(401, 'UNAUTHORIZED', …, undefined, { 'WWW-Authenticate': 'Bearer' })`. Do not use terminus’s body for ready-503 |
+| 4 | Task 4 Step 3 | `HEALTHCHECK … wget -qO-` on `node:26-alpine`. No GNU wget; busybox `wget` (if any) rejects `-qO-`. Compose still starts; `docker compose ps` shows unhealthy | Grader, almost every run | Recalled (official `node:alpine` has no GNU wget). Design §13 says `HEALTHCHECK` but not wget | `HEALTHCHECK CMD ["node","-e","fetch('http://127.0.0.1:3000/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]` |
+| 5 | Task 8 Step 4; Task 4 Dockerfile | `nest-cli` assets do not copy `seed/` (outside `src/`). Jest reads `seed/` from the cwd, so Task 8’s tests pass and the image has no file. Task 8 does not run the clean-image check | Task 9 agent, often; grader’s `GET /v1/exercises/bench%20press` if that check is dropped | Recalled (nest assets are under `src`). Design §14 already warns. Plan’s Task 8 verify line omits the image | Task 4: name stage `build`; `COPY seed ./seed` and migrations into the runtime image. Task 8: resolve the seed path from cwd in tests and from a path next to `dist/cli/migrate.js` in the image. Run `scripts/clean-image-check.sh` in Task 8 once the curl from Task 9 is the proof — until then, assert the file exists in the image in Task 8 |
+| 6 | Task 6 Step 3 | `Temporal.Instant.from` on `…+07:00[Asia/Ho_Chi_Minh]` throws. The throw-order classifier then reports “not an RFC 3339 date-time”. The same step’s bracket row cannot pass | Task 6 agent, certain if Instant rejects annotations | Recalled (Instant grammar rejects a trailing `[…]`). Design §8 table requires the bracket accepted and ignored | Strip a trailing `[…]` before `Instant.from`. Read the offset from the original text. Add that sentence to Step 3 |
+| 7 | Task 18 Step 1; Task 2 Step 5 | `helmet()` default CSP blocks Swagger UI inline scripts. `/docs` is a blank page. Prefix exclude does not fix CSP | Grader opening `/docs`, very often, unless Swagger is cut | Recalled (helmet 7+ CSP vs swagger-ui) | Task 18 Step 1: `helmet({ contentSecurityPolicy: false })` or a CSP that allows Swagger’s assets, and a clean-image curl that asserts `/docs` is HTML containing `swagger` |
+| 8 | Task 12 Step 1 | At `BENCH_SCALE=0.01`, heavy user is 500 rows, but the same bullet requires the most-trained exercise to hold “2 500–4 000 of 50 000” | Task 12 agent, very often; they will “fix” a correct generator | From the plan, vs design §11 (those counts are full scale) | Assert 5–8% of that run’s heavy-user rows (25–40 at 0.01). Move 2 500–4 000 to a comment about scale 1 only |
+| 9 | Task 10 Steps 1 and 3 | Own-unit test uses 225, which `display()` also returns as 225. Design’s distinguishing case is `100.125` → weight `100.125`, volume `100.13`. Step 3 never calls `decimalPlaces`. `numeric(9,3)` rounds a 4th decimal silently (anti-goal in design §2) | Grader with microplates, sometimes; agent ships it because tests pass | Design §6 and §9.1; plan test uses 225 only. Recalled: PG numeric rounds excess scale | Pin `100.125` kg read as kg. In Step 3, reject `decimalPlaces(weight) > MAX_WEIGHT_DECIMALS`, and weight outside 0–`MAX_WEIGHT`, with a test for `10.1234` and for `0` |
+| 10 | Task 15 Step 1 | “104.37 and 103.33 give a delta of 1.03” does not give the exact kilograms. Subtracting the displayed numbers yields 1.04. The agent will change a correct `computeDelta` to match a bad test | Task 15 agent, likely | Design §9.4 states the 0.01 trap; the plan does not give inputs | Put the exact kg strings in the step. State that `display(current) - display(previous)` must not be the expected value |
+| 11 | Task 17 Steps 1 and 4 | The 401 test cannot pass unless the guard is applied. The committed controller must keep both §10.7 lines commented. Nest `UnauthorizedException` hits finding 3. DELETE tests never assert 204; Nest’s default for DELETE is 200 | Task 17 agent, likely; grader comparing README status codes, often | Design §10.7 and §9 route table (204). Plan commit text says “not applied” | Step 1: apply `UseGuards(AdminTokenGuard)` only in the test module (subclass or test wrapper). Step 4: production file matches the two commented lines byte for byte. Assert 204 and empty body on both deletes (`@HttpCode(204)`) |
+| 12 | Task 9 Steps 3–5 | `CatalogExercise` has no `createdAt`/`updatedAt`. No step says public GETs read the tables, not the snapshot. Every listed test passes if GET is served from memory | Grader who inserts via SQL or checks GET after a write on another process, sometimes | Design §10.2 and §10.4 | Step 5: repository returns `{ key, name, muscleGroups, createdAt, updatedAt }`, ordered by key. Test: SQL insert is visible on `GET /v1/exercises` and `GET /v1/muscle-groups` with no `refresh()` |
+| 13 | Task 10 Step 3; no test | “A non-UUID id is a 404 without a query” is untested. `id::uuid` cast or a Drizzle uuid bind raises `22P02`, and finding 3 turns that into 500 | Grader with a typo’d id, sometimes | From the plan; design §9.6 has no 500 for a bad id | Test `GET …/workout-entries/not-a-uuid` → 404 `NOT_FOUND`, and assert the repository was not called (or that no SQL error is logged) |
+| 14 | Tasks 14–17 | `UserIdPipe` is only described on the workout controller. PR, compare, and admin routes can accept a space or `ü` and then 500 or treat it as a real id. Review Focus 4 names only Tasks 10 and 13 | Grader reusing a bad id on `/personal-records`, sometimes | Design §9: path `userId` is `[A-Za-z0-9_.-]{1,64}` for the workout API; admin keys are a different alphabet | Task 10: document the pipe on every `:userId` route. Tasks 14 and 15: one test each, same three bad ids as Task 10. Do not put `UserIdPipe` on `exerciseKey` or muscle-group names |
+| 15 | Task 4 Step 5; Task 12 | `depends_on: postgres: service_healthy` is not Compose YAML. Task 4 never names a build stage; Task 12 tells the bench service to use “the Dockerfile’s build stage” and `npm run bench:data` after `npm prune --omit=dev` | Task 4 agent, often (script fails immediately); Task 12 agent, often | Recalled: Compose long syntax is `condition:`. Plan never has `AS build` | Task 4 Step 5: show the long `depends_on` form. Step 3: `FROM node:26-alpine AS build` and a runtime stage that does not prune the build stage. Task 12: `build.target: build` |
+
+## Answers
+
+1. **Coverage.** No task tests: design §6 own-unit `100.125` and §9.1 “at most 3 decimal places”; §17 “`GET …/workout-entries/{id}` accepts `unit` like the list”; §10.4 `createdAt`/`updatedAt`; §9.6 health 503 as problem+json; §12 “burst … PRs correct” (Task 11 drops it, Task 14 never adds it); §6 OpenAPI input `unit` is a string, output is an enum of codes (Task 10 only pins `date` and `utcOffset` text). Weight `0` is allowed (§9.1, A9) and never posted. `reps: 5.5` can reach an `integer` column and 500.
+
+2. **Interfaces.** Finding 1 (reset never called). Finding 15 (stage name, `depends_on`). Task 14’s Produces block says “It consumes `Executor`” — move that under Consumes. Task 10 and Task 14 never list `app.module.ts` imports; tests catch that. `EntryResponse` is used and not defined — point it at the §9.1 JSON. `runMigrateStep(env)` has no seed-path argument, so the bad-file integration test in Task 8 has no hook (unit `validateSeedFile` already covers the 101-character name; add an optional path).
+
+3. **Will not work.** Findings 2, 4, 5, 6, 7, 15. Also Task 6’s classifier, as written, fails its own bracket row.
+
+4. **Tests.** Finding 2 (1 MB test cannot fail). Finding 8 (wrong numbers). Finding 9 (225 cannot fail a always-`display()` bug). Finding 10 (proves the displayed subtraction). Finding 11 (401 test forces the guard on). Finding 13 (stated 404 has no test). Task 6’s `checkRange` only mentions equality; design §8 is `from >= to` after rounding — add `from > to`.
+
+5. **Sizing.** Task 6 (date table) and Task 10 (parse + persist + two routes) will overrun their share of §16 and are too large for one review; split Task 10 after `readEntryInputs` tests pass, before the repository. Task 12’s full-scale `docker compose --profile bench up` plus Task 16’s ~9 cases × 550 requests × 2 concurrencies × 2 vacuum states will blow slice 11’s 3.4 h even when every budget passes. Do not reorder slices. Task 18’s §15 README list is the other likely overrun; it is still one task.
+
+6. **Review Focus.** Keep 1 (string numbers), 2 (empty query), 3 (`limit`), and 5 (missing PR/compare params) — Postman and a first curl hit these, and the design’s §12 list does not name them. Replace 4: a grader sends `u_123` or a uuid, not `ü`. Better inputs: (a) `?unit=lbs` on history and PRs → 200, not 400; (b) an unknown JSON property → 400 naming it, not dropped; (c) `weight: 0` → 201 and `weight: 10.1234` → 400. Helmet (finding 7) is not an input but will bite more often than `ü`.
+
+7. **What an agent will still get wrong.** `parseFloat` on `weight_kg` (numeric comes back as a string). History step 1 selecting `*` so the `INCLUDE` index never goes index-only (tests pass; the benchmark is the only check). `position` omitted on seed links (Task 9’s order test catches it one task late). Compare’s follow-up load using the global pool instead of the transaction. `setNumber` required on the client DTO. Logging `DATABASE_URL` with the password despite Task 3’s sentence.
+
+## Contradictions
+
+- Plan Task 2: “anything else → 500”. Design §9.6: 401 `UNAUTHORIZED` “sent with `WWW-Authenticate: Bearer`”, and “Every non-2xx is `application/problem+json`”.
+- Plan Task 10 route list: GET by id has no `unit`. Design §17: “`GET …/workout-entries/{id}` accepts `unit` like the list”.
+- Plan Task 9: snapshot type and “implement the three routes”, no table read. Design §10.2: “The catalog’s own GET endpoints read the tables directly.” Design §10.4: list includes `createdAt`, `updatedAt`.
+- Plan Task 8: “reads and validates `seed/exercise-catalog.seed.json` before taking any lock”. Design §10.3: “Lock first, then read the ledger.” Narrow the plan sentence to file validation only; the ledger read stays inside `pg_advisory_xact_lock(CATALOG_WRITE_LOCK)`.
+- Plan Task 12 Step 1 vs design §11: 2 500–4 000 is the unscaled heavy user, not `BENCH_SCALE=0.01`.
+
+## Technical errors
+
+- `wget -qO-` in `node:26-alpine` (finding 4). Recalled.
+- Nest default body parser limit `100kb` unless `bodyParser: false` (finding 2). Recalled.
+- `depends_on: <svc>: service_healthy` is not valid Compose; use `condition: service_healthy` / `service_completed_successfully`. Recalled.
+- `Temporal.Instant.from` does not accept a trailing zone annotation (finding 6). Recalled.
+- `helmet()` default CSP breaks Swagger UI (finding 7). Recalled.
+- PostgreSQL `numeric(9,3)` rounds a 4th decimal rather than raising (finding 9). Recalled.
+- The Jest `transformIgnorePatterns` note does not prove `node dist/main.js` can load ESM-only `uuid` 14. Add a compiled `node -e` import in Task 1. If that throws `ERR_REQUIRE_ESM`, cache `await import('uuid')` at startup; do not treat a green Jest test as proof. Recalled, uncertain on Node 26’s `require(esm)` — the check is cheap either way.
+
+Not errors: `statement_timeout` on `pg` 8.23, `Instant.round` floor toward −∞ for the 1950 cut, uuid text order vs PostgreSQL uuid order for canonical lowercase ids, and `ESCAPE` doubling being settled by the `%`/`_` test rather than by the plan’s spelling.
+
