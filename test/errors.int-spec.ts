@@ -1,5 +1,6 @@
 import { INestApplication, Logger } from '@nestjs/common';
 import get from 'lodash/get';
+import type { ClientRequest } from 'node:http';
 import request from 'supertest';
 import { createTestApp } from './support/app';
 import { ProbeController } from './support/probe.controller';
@@ -25,6 +26,10 @@ function recordFilterLogs(): LogCall[] {
   }
   return calls;
 }
+
+// A header of the request as it was sent; supertest's types omit res.req.
+const sentHeader = (res: request.Response, name: string) =>
+  (res as unknown as { req: ClientRequest }).req.getHeader(name);
 
 // One header helmet sets, and the one it removes.
 function expectHelmet(res: request.Response) {
@@ -253,7 +258,7 @@ describe('errors', () => {
   // POST with no body; type-is would count that as a body.
   it('an empty POST with no Content-Type passes on to validation', async () => {
     const res = await http().post('/v1/probe').expect(400);
-    expect(res.req.getHeader('content-type')).toBeUndefined();
+    expect(sentHeader(res, 'content-type')).toBeUndefined();
     expect(res.body.code).toBe('VALIDATION_ERROR');
   });
 
@@ -272,7 +277,7 @@ describe('errors', () => {
       .post('/v1/probe')
       .send(Buffer.from('{"n":1}'))
       .expect(415);
-    expect(res.req.getHeader('content-type')).toBeUndefined();
+    expect(sentHeader(res, 'content-type')).toBeUndefined();
     expect(res.body).toMatchObject({
       code: 'UNSUPPORTED_MEDIA_TYPE',
       detail: 'Send Content-Type: application/json',
