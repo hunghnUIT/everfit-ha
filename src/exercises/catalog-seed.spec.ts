@@ -1,9 +1,19 @@
-import { existsSync, readFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { MAX_GROUPS_PER_EXERCISE } from '../common/limits';
 import {
   DEFAULT_SEED_PATH,
   planSeed,
+  readSeedFile,
   SeedFile,
+  SeedFileError,
   validateSeedFile,
 } from './catalog-seed';
 import { exerciseKey } from './exercise-key';
@@ -386,4 +396,48 @@ describe('the seed file', () => {
         },
       ]),
     ));
+});
+
+describe('readSeedFile', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'seed-unit-'));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  // The thrown error, so its type and message can be checked.
+  const failureOf = (path: string): unknown => {
+    try {
+      readSeedFile(path);
+      return undefined;
+    } catch (error) {
+      return error;
+    }
+  };
+
+  const expectFileError = (path: string, ...parts: string[]) => {
+    const error = failureOf(path);
+    expect(error).toBeInstanceOf(SeedFileError);
+    const message = (error as SeedFileError).message;
+    for (const part of [path, ...parts]) expect(message).toContain(part);
+    expect(message).not.toContain('postgres://');
+  };
+
+  it('a missing file throws SeedFileError naming the file', () =>
+    expectFileError(join(dir, 'missing.json'), '(file)'));
+
+  it('a file that is not JSON throws SeedFileError naming the file', () => {
+    const path = join(dir, 'not-json.json');
+    writeFileSync(path, 'muscleGroups: chest');
+    expectFileError(path, '(file): cannot be read as JSON');
+  });
+
+  it('an invalid file throws SeedFileError naming the file and the item path', () => {
+    const path = join(dir, 'invalid.json');
+    writeFileSync(
+      path,
+      JSON.stringify({
+        muscleGroups: ['chest'],
+        exercises: [{ name: 'Bench Press', muscleGroups: ['legs'] }],
+      }),
+    );
+    expectFileError(path, 'exercises[0].muscleGroups[0]:');
+  });
 });

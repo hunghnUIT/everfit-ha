@@ -30,7 +30,7 @@ export async function runMigrateStep(
   env: MigrateEnv,
   opts: { seedPath?: string } = {},
 ): Promise<void> {
-  const seed = readSeedFile(opts?.seedPath ?? DEFAULT_SEED_PATH);
+  const seed = readSeedFile(opts.seedPath ?? DEFAULT_SEED_PATH);
   // The seed's warnings (a group an admin deleted) go to the step's log.
   const logger = pino({ name: 'migrate', level: env.LOG_LEVEL });
   const pool = new Pool({ connectionString: env.DATABASE_URL, max: 1 });

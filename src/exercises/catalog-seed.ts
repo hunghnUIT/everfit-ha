@@ -257,6 +257,8 @@ export async function runSeed(
     const groupRows = await tx
       .select({ name: muscleGroups.name })
       .from(muscleGroups);
+    // One ledger read serves both kinds; this splits it into the two sets
+    // planSeed takes. A one-line helper, so no library call is worth it.
     const keysOf = (kind: 'exercise' | 'muscle_group') =>
       new Set(ledgerRows.filter((r) => r.kind === kind).map((r) => r.itemKey));
     const plan = planSeed(

@@ -1,5 +1,5 @@
 import get from 'lodash/get';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Pool } from 'pg';
@@ -167,24 +167,29 @@ describe('the catalog seed (design §10.3)', () => {
 
   it('a seed file with a 101-character name fails the migrate step on an empty database, naming exercises[0].name, and leaves it empty', async () => {
     const url = await createEmptyDatabase();
-    const badFile = join(mkdtempSync(join(tmpdir(), 'seed-')), 'bad.json');
-    writeFileSync(
-      badFile,
-      JSON.stringify({
-        muscleGroups: ['chest'],
-        exercises: [{ name: 'A'.repeat(101), muscleGroups: ['chest'] }],
-      }),
-    );
-    await expect(
-      runMigrateStep(
-        { DATABASE_URL: url, LOG_LEVEL: 'fatal' },
-        { seedPath: badFile },
-      ),
-    ).rejects.toThrow(
-      'exercises[0].name: The name must be at most 100 characters; it has 101.',
-    );
-    await expect(
-      query(`SELECT to_regclass('workout_entries') AS t`, [], url),
-    ).resolves.toEqual([{ t: null }]);
+    const dir = mkdtempSync(join(tmpdir(), 'seed-'));
+    const badFile = join(dir, 'bad.json');
+    try {
+      writeFileSync(
+        badFile,
+        JSON.stringify({
+          muscleGroups: ['chest'],
+          exercises: [{ name: 'A'.repeat(101), muscleGroups: ['chest'] }],
+        }),
+      );
+      await expect(
+        runMigrateStep(
+          { DATABASE_URL: url, LOG_LEVEL: 'fatal' },
+          { seedPath: badFile },
+        ),
+      ).rejects.toThrow(
+        'exercises[0].name: The name must be at most 100 characters; it has 101.',
+      );
+      await expect(
+        query(`SELECT to_regclass('workout_entries') AS t`, [], url),
+      ).resolves.toEqual([{ t: null }]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
