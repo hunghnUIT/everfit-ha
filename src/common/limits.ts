@@ -24,6 +24,8 @@ export const BODY_LIMIT = '1mb';
 // Time
 export const FUTURE_TOLERANCE_MS = 15 * 60_000;
 export const EARLIEST_INSTANT = '1900-01-01T00:00:00Z';
+export const MIN_UTC_OFFSET_MINUTES = -12 * 60;
+export const MAX_UTC_OFFSET_MINUTES = 14 * 60;
 
 // Storage
 export const WEIGHT_KG_INTEGER_DIGITS = 6;

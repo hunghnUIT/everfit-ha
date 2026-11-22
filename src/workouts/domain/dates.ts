@@ -1,12 +1,17 @@
-import { EARLIEST_INSTANT, FUTURE_TOLERANCE_MS } from '../../common/limits';
+import attempt from 'lodash/attempt';
+import isError from 'lodash/isError';
+import {
+  EARLIEST_INSTANT,
+  FUTURE_TOLERANCE_MS,
+  MAX_UTC_OFFSET_MINUTES,
+  MIN_UTC_OFFSET_MINUTES,
+} from '../../common/limits';
 import { Check, FieldError } from '../../common/problem';
 
 // Design §8. One parser, Temporal.Instant.from; the hand-written patterns
 // below read only what Temporal does not expose.
 
 const EARLIEST = Temporal.Instant.from(EARLIEST_INSTANT);
-const MIN_OFFSET_MINUTES = -12 * 60;
-const MAX_OFFSET_MINUTES = 14 * 60;
 const Z_ADVICE = 'Z means UTC, not your local time.';
 
 // The offset an instant was written with: Temporal parses it but does not
@@ -33,16 +38,6 @@ const failure = (path: string, message: string): Check<never> => ({
   errors: [{ path, message }],
 });
 
-// Temporal reports a text it cannot read by throwing; this keeps the
-// three-way diagnosis below free of nested try blocks.
-function attempt<T>(parse: () => T): T | undefined {
-  try {
-    return parse();
-  } catch {
-    return undefined;
-  }
-}
-
 const writeDateAlone: Advice = (raw, day) =>
   `'${raw}' has no time or UTC offset, so the moment it names is ` +
   `unknown. Add the time and your UTC offset, for example ` +
@@ -60,14 +55,16 @@ const fromDateAlone: Advice = (raw, day) =>
 
 // Why Temporal.Instant.from refused the text, in the order of §8 and the plan:
 // a date alone, then a date-time with no offset, then anything else.
+// Temporal reports a text it cannot read by throwing; lodash's attempt returns
+// the Error instead, and a Temporal value is never an Error.
 function refusal(raw: string, dateAlone: Advice): string {
   const trimmed = raw.trim();
-  const day = DATE_ALONE.test(trimmed)
-    ? attempt(() => Temporal.PlainDate.from(trimmed))
-    : undefined;
-  if (day) return dateAlone(raw, day);
+  if (DATE_ALONE.test(trimmed)) {
+    const day = attempt(() => Temporal.PlainDate.from(trimmed));
+    if (!isError(day)) return dateAlone(raw, day);
+  }
   const local = attempt(() => Temporal.PlainDateTime.from(raw));
-  if (local) {
+  if (!isError(local)) {
     return (
       `'${raw}' has no UTC offset, so the moment it names is unknown. ` +
       `Add your UTC offset, for example ${local.toString()}+07:00. ${Z_ADVICE}`
@@ -95,13 +92,13 @@ function parseInstant(
     );
   }
   const instant = attempt(() => Temporal.Instant.from(raw));
-  if (!instant) return failure(path, refusal(raw, dateAlone));
+  if (isError(instant)) return failure(path, refusal(raw, dateAlone));
   // An offset with seconds does not match the pattern: undefined.
   const minutes = OFFSET_AT_END.test(raw) ? readOffsetMinutes(raw) : undefined;
   if (
     minutes === undefined ||
     (minutes !== null &&
-      (minutes < MIN_OFFSET_MINUTES || minutes > MAX_OFFSET_MINUTES))
+      (minutes < MIN_UTC_OFFSET_MINUTES || minutes > MAX_UTC_OFFSET_MINUTES))
   ) {
     return failure(
       path,
@@ -211,9 +208,12 @@ export function checkRange(
   ];
 }
 
-// The offset written in a text Temporal accepted, in minutes east of UTC.
-// `Z` and `-00:00` mean "UTC known, local offset unknown" (RFC 9557), so they
-// give null. Throws on a text with no readable offset (one with seconds).
+// The offset a text ends with, in minutes east of UTC. `Z` and `-00:00` mean
+// "UTC known, local offset unknown" (RFC 9557), so they give null. It reads
+// only the end of the text: it checks neither the range (`+15:00` gives 900)
+// nor that the text is an instant (`2025-02-10` gives -600, read as `-10`),
+// so callers validate first, as parseInstant does. It throws only when the
+// end matches no offset at all (for example an offset with seconds).
 export function readOffsetMinutes(text: string): number | null {
   const match = OFFSET_AT_END.exec(text);
   if (!match) throw new RangeError(`No UTC offset in '${text}'`);
