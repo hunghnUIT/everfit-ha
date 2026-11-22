@@ -13,7 +13,7 @@ export class UserIdPipe implements PipeTransform<string, string> {
       {
         path: 'userId',
         message:
-          `'${value}' is not a userId: use 1 to 64 letters, digits, ` +
+          `'${value}' is not a userId: use 1 to 64 ASCII letters, digits, ` +
           "'_', '.' or '-'.",
       },
     ]);

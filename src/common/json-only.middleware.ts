@@ -1,6 +1,9 @@
 import type { NextFunction, Request, Response } from 'express';
 import { ApiProblem } from './problem';
 
+// The 415 detail, as design §9.6 words it; the filter uses it too.
+export const JSON_ONLY_DETAIL = 'Send Content-Type: application/json';
+
 const BODY_METHODS: ReadonlySet<string> = new Set(['POST', 'PUT', 'PATCH']);
 
 // Design §9.6: only JSON is parsed, and any other body is a 415, so that
@@ -25,13 +28,7 @@ export function requireJson(
     !empty &&
     req.is('application/json') === false
   ) {
-    next(
-      new ApiProblem(
-        415,
-        'UNSUPPORTED_MEDIA_TYPE',
-        'Send Content-Type: application/json',
-      ),
-    );
+    next(new ApiProblem(415, 'UNSUPPORTED_MEDIA_TYPE', JSON_ONLY_DETAIL));
     return;
   }
   next();

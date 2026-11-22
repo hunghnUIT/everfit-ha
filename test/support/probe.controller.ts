@@ -1,4 +1,12 @@
-import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Patch,
+  Post,
+  Put,
+} from '@nestjs/common';
 import { IsInt, IsOptional, IsString, Min } from 'class-validator';
 
 class ProbeDto {
@@ -18,6 +26,17 @@ export class ProbeController {
   @Post()
   @HttpCode(200)
   echo(@Body() body: ProbeDto): ProbeDto {
+    return body;
+  }
+
+  // The other two methods requireJson checks.
+  @Put()
+  put(@Body() body: ProbeDto): ProbeDto {
+    return body;
+  }
+
+  @Patch()
+  patch(@Body() body: ProbeDto): ProbeDto {
     return body;
   }
 

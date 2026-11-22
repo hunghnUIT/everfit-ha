@@ -245,6 +245,18 @@ describe('errors', () => {
     ]);
   });
 
+  it.each(['put', 'patch'] as const)(
+    '%s: a form body → 415, a JSON body → accepted',
+    async (method) => {
+      const form = await http()[method]('/v1/probe').type('form').send('n=1');
+      expect(form.status).toBe(415);
+      expect(form.body.detail).toBe('Send Content-Type: application/json');
+      const json = await http()[method]('/v1/probe').send({ n: 1 });
+      expect(json.status).toBe(200);
+      expect(json.body).toEqual({ n: 1 });
+    },
+  );
+
   it('Content-Type application/json; charset=utf-8 → accepted', async () => {
     const res = await http()
       .post('/v1/probe')
