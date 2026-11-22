@@ -5,9 +5,8 @@ import { query } from './database';
 
 export const PROBLEM_JSON = /^application\/problem\+json/;
 
-// The fixed "now" the plan's date tests use. Every sample date in the entry
-// tests lies before it, and the write rule refuses a date more than 15
-// minutes after it.
+// The fixed "now" the plan's date tests use. The write rule accepts a date up
+// to 15 minutes after it and refuses a later one; the §9.1 sample lies before it.
 export const NOW = '2025-02-11T03:00:00Z';
 
 // The response, after its status is checked; on a mismatch Jest shows the body.
