@@ -1,17 +1,52 @@
-import { INestApplication } from '@nestjs/common';
+import { INestApplication, Logger } from '@nestjs/common';
+import { get } from 'lodash';
 import request from 'supertest';
 import { createTestApp } from './support/app';
 import { ProbeController } from './support/probe.controller';
 
 const PROBLEM_JSON = /^application\/problem\+json/;
 
+type LogCall = { level: 'log' | 'warn' | 'error'; fields: unknown };
+
+// The harness mutes logs (LOG_LEVEL=fatal), so the problem filter's log calls
+// are recorded at its Nest Logger instead, and nothing is printed.
+function recordFilterLogs(): LogCall[] {
+  const calls: LogCall[] = [];
+  for (const level of ['log', 'warn', 'error'] as const) {
+    jest.spyOn(Logger.prototype, level).mockImplementation(function (
+      this: Logger,
+      fields: unknown,
+      ..._rest: unknown[]
+    ) {
+      if (get(this, 'context') === 'ProblemDetailsFilter') {
+        calls.push({ level, fields });
+      }
+    });
+  }
+  return calls;
+}
+
+// One header helmet sets, and the one it removes.
+function expectHelmet(res: request.Response) {
+  expect(res.headers['x-content-type-options']).toBe('nosniff');
+  expect(res.headers['x-powered-by']).toBeUndefined();
+}
+
 describe('errors', () => {
   let app: INestApplication;
   const http = () => request(app.getHttpServer());
 
+  let logs: LogCall[];
+
   beforeAll(async () => {
     app = await createTestApp({ controllers: [ProbeController] });
   });
+
+  beforeEach(() => {
+    logs = recordFilterLogs();
+  });
+
+  afterEach(() => jest.restoreAllMocks());
 
   it('unknown route → 404 application/problem+json, code NOT_FOUND, requestId', async () => {
     const res = await http().get('/v1/nothing-here').expect(404);
@@ -32,6 +67,7 @@ describe('errors', () => {
       .send('{"n": 1,')
       .expect(400);
     expect(res.headers['content-type']).toMatch(PROBLEM_JSON);
+    expectHelmet(res);
     expect(res.body).toMatchObject({
       code: 'MALFORMED_JSON',
       instance: '/v1/probe',
@@ -51,6 +87,7 @@ describe('errors', () => {
       .send({ n: 1, note: 'x'.repeat(1_100_000) })
       .expect(413);
     expect(res.headers['content-type']).toMatch(PROBLEM_JSON);
+    expectHelmet(res);
     expect(res.body).toMatchObject({
       code: 'PAYLOAD_TOO_LARGE',
       requestId: expect.any(String),
@@ -98,6 +135,55 @@ describe('errors', () => {
     );
     expect(res.body.code).toBe('INTERNAL_ERROR');
     expect(res.text).not.toMatch(/secretColumn|TypeError|\.ts:\d+/);
+    expect(logs).toEqual([
+      {
+        level: 'error',
+        fields: expect.objectContaining({
+          requestId: res.body.requestId,
+          err: expect.any(TypeError),
+        }),
+      },
+    ]);
+  });
+
+  it('a database that is down → 503, logged as one warn line with the code only', async () => {
+    const res = await http().get('/v1/probe/db-down').expect(503);
+    expect(res.body).toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    expect(logs).toEqual([
+      {
+        level: 'warn',
+        fields: { code: 'ECONNREFUSED', requestId: res.body.requestId },
+      },
+    ]);
+    const databaseUrl = process.env.DATABASE_URL ?? '';
+    const written = JSON.stringify(logs);
+    expect(written).not.toContain(databaseUrl);
+    expect(written).not.toContain(`:${new URL(databaseUrl).password}@`);
+  });
+
+  it('logs a body-parser failure in one line, as the request logger never saw it', async () => {
+    await http()
+      .post('/v1/probe')
+      .set('Content-Type', 'application/json')
+      .set('x-request-id', 'client-request-44')
+      .send('{')
+      .expect(400);
+    expect(logs).toEqual([
+      {
+        level: 'log',
+        fields: {
+          method: 'POST',
+          path: '/v1/probe',
+          status: 400,
+          requestId: 'client-request-44',
+        },
+      },
+    ]);
+  });
+
+  it('writes no such line for a request the request logger logs', async () => {
+    await http().get('/v1/nothing-here').expect(404);
+    expect(logs).toEqual([]);
   });
 
   it('echoes x-request-id and reports it as requestId', async () => {

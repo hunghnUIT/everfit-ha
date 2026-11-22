@@ -22,15 +22,16 @@ export function configureApp(app: NestExpressApplication): void {
   app.setGlobalPrefix('v1', {
     exclude: ['health/live', 'health/ready', 'docs', 'docs-json'],
   });
-  // express.json, the only body parser (Nest's adapter calls express.json
-  // with these options).
-  app.useBodyParser('json', { limit: BODY_LIMIT, type: 'application/json' });
+  // Before the body parser, so a request it refuses still gets the headers.
   // Compose serves plain HTTP, so the Swagger UI must not be upgraded to HTTPS.
   app.use(
     helmet({
       contentSecurityPolicy: { directives: { upgradeInsecureRequests: null } },
     }),
   );
+  // express.json, the only body parser (Nest's adapter calls express.json
+  // with these options).
+  app.useBodyParser('json', { limit: BODY_LIMIT, type: 'application/json' });
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

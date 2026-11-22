@@ -21,6 +21,16 @@ export class ProbeController {
     return body;
   }
 
+  // What pg rejects with when the database is down; the message names the
+  // URL, as a driver's message may name the host.
+  @Get('db-down')
+  dbDown(): never {
+    throw Object.assign(
+      new Error(`connect ECONNREFUSED ${process.env.DATABASE_URL}`),
+      { code: 'ECONNREFUSED' },
+    );
+  }
+
   @Get('boom')
   boom(): never {
     throw new TypeError(

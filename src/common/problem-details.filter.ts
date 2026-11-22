@@ -110,8 +110,27 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     const res = http.getResponse<Response>();
     const problem = toApiProblem(exception);
     const requestId = requestIdOf(req, res);
+    const instance = req.originalUrl.split('?', 1)[0];
     if (problem.status === 500) {
       this.logger.error({ err: exception, requestId }, 'Unhandled error');
+    }
+    // The code alone: the driver's message may name the database host.
+    const driverCode = driverErrorCode(exception);
+    if (isConnectionFailure(driverCode)) {
+      this.logger.warn({ code: driverCode, requestId }, 'Database unreachable');
+    }
+    // pino-http sets req.log. Without it the request logger never ran (the
+    // body parser refused the request first), so this is the only line.
+    if (get(req, 'log') === undefined) {
+      this.logger.log(
+        {
+          method: req.method,
+          path: instance,
+          status: problem.status,
+          requestId,
+        },
+        'Request refused before the request logger ran',
+      );
     }
     res
       .status(problem.status)
@@ -123,7 +142,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
         status: problem.status,
         code: problem.code,
         detail: problem.detail,
-        instance: req.originalUrl.split('?', 1)[0],
+        instance,
         requestId,
         ...(problem.errors && { errors: problem.errors }),
       });
