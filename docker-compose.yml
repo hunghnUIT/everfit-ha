@@ -1,0 +1,68 @@
+# `docker compose up` is the whole setup: postgres, then the one-shot
+# migrate step, then api (design §13). No .env is needed: every value below
+# is a development default written as ${VAR:-default}, so a shell variable
+# or a .env file overrides it. The database password is a development value;
+# a real deployment injects its own.
+
+# One database setting for migrate, api and (Task 12) the bench service.
+x-db-env: &db-env
+  DATABASE_URL: postgres://${POSTGRES_USER:-workout}:${POSTGRES_PASSWORD:-workout}@postgres:5432/${POSTGRES_DB:-workout}
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-workout}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-workout}
+      POSTGRES_DB: ${POSTGRES_DB:-workout}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    # PostgreSQL 18 keeps its data under /var/lib/postgresql; the older
+    # /var/lib/postgresql/data mount would not persist.
+    volumes:
+      - pgdata:/var/lib/postgresql
+    # Loopback only, and not 5432, so a local PostgreSQL does not clash and
+    # the database is not exposed beyond the machine.
+    ports:
+      - "127.0.0.1:${DB_HOST_PORT:-55432}:5432"
+
+  migrate:
+    build:
+      context: .
+      target: runtime
+    command: ["node", "dist/cli/migrate.js"]
+    environment:
+      <<: *db-env
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      target: runtime
+    # A process that could not start (for example, could not load the
+    # catalog at boot) is started again.
+    restart: on-failure
+    # The container always listens on 3000, which the image's HEALTHCHECK
+    # calls, so PORT is not passed; API_PORT picks the host port.
+    environment:
+      <<: *db-env
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DB_POOL_MAX: ${DB_POOL_MAX:-10}
+      DB_STATEMENT_TIMEOUT_MS: ${DB_STATEMENT_TIMEOUT_MS:-5000}
+      CATALOG_REFRESH_SECONDS: ${CATALOG_REFRESH_SECONDS:-300}
+      # No default anywhere: empty means unset.
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-}
+    ports:
+      - "${API_PORT:-3000}:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:
