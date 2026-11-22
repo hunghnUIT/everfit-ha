@@ -3,10 +3,11 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
+import { requireJson } from './common/json-only.middleware';
 import { BODY_LIMIT } from './common/limits';
 import { validationProblem } from './common/problem';
 import { ProblemDetailsFilter } from './common/problem-details.filter';
-import { toFieldErrors } from './common/validation';
+import { toFieldErrors, VALIDATOR_OPTIONS } from './common/validation';
 
 // Nest's own parsers stay off: their 100 kb JSON limit and their form parser
 // would run before any parser configureApp adds. Logs are buffered until the
@@ -29,14 +30,17 @@ export function configureApp(app: NestExpressApplication): void {
       contentSecurityPolicy: { directives: { upgradeInsecureRequests: null } },
     }),
   );
+  // A body that is not JSON is a 415 before any parser reads it (§9.6).
+  app.use(requireJson);
   // express.json, the only body parser (Nest's adapter calls express.json
   // with these options).
   app.useBodyParser('json', { limit: BODY_LIMIT, type: 'application/json' });
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      stopAtFirstError: true,
+      ...VALIDATOR_OPTIONS,
+      // Nest drops each error's target by default; toFieldErrors reads it to
+      // tell a query DTO from a body DTO. The target never reaches a response.
+      validationError: { target: true },
       transform: true,
       transformOptions: { enableImplicitConversion: false },
       exceptionFactory: (errors) => validationProblem(toFieldErrors(errors)),

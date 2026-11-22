@@ -68,3 +68,8 @@ export class UnitRegistry {
     return factor;
   }
 }
+
+// The one instance: UnitsModule provides it under UNIT_REGISTRY, and
+// IsSupportedUnit, which class-validator runs outside Nest's container, reads
+// it directly.
+export const SHARED_UNIT_REGISTRY = new UnitRegistry();
